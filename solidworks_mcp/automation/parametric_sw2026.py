@@ -1,7 +1,8 @@
 """SOLIDWORKS 2026 parametric-sketch compatibility fixes.
 
 This module subclasses the 6.5.31 parametric backend and narrows the behavioral
-changes to topology-changing coincident constraints and SketchPoint lifetime.
+changes to topology-changing coincident constraints, SketchPoint lifetime, and
+active-sketch recovery after a SOLIDWORKS rebuild.
 It is intentionally separate from the large upstream parametric.py so the fork
 can keep upstream changes easy to review and merge.
 """
@@ -11,7 +12,7 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 
-from .com_utils import com_get
+from .com_utils import com_get, select_by_id2
 from .parametric import (
     RELATION_CODES,
     ParametricSketchOperations as _BaseParametricSketchOperations,
@@ -20,7 +21,123 @@ from .parametric import (
 
 
 class ParametricSketchOperations(_BaseParametricSketchOperations):
-    """Parametric backend with SW2026-safe coincident verification."""
+    """Parametric backend with SW2026-safe sketch lifecycle handling."""
+
+    def create_parametric_sketch(self, name: str, *args, **kwargs):
+        """Expose the sketch name to bounded SW2026 lifecycle recovery.
+
+        ``create_parametric_sketch`` in the upstream backend creates and renames
+        the sketch before its one mandatory ``EditRebuild3``.  On SW2026 SP0
+        that rebuild can leave the ProfileFeature intact while clearing
+        ``SketchManager.ActiveSketch``.  The final Normal-To verification needs
+        the intended sketch name so it can reactivate only the sketch owned by
+        this atomic operation.
+        """
+        sentinel = object()
+        previous = getattr(
+            self, "_sw2026_expected_active_sketch_name", sentinel)
+        self._sw2026_expected_active_sketch_name = str(name)
+        try:
+            return super().create_parametric_sketch(name, *args, **kwargs)
+        finally:
+            if previous is sentinel:
+                try:
+                    delattr(self, "_sw2026_expected_active_sketch_name")
+                except AttributeError:
+                    pass
+            else:
+                self._sw2026_expected_active_sketch_name = previous
+
+    def _reactivate_expected_sketch(self, doc, sketch_name):
+        """Reactivate a known sketch after SW2026 drops the edit context.
+
+        This deliberately does not call ``_activate_sketch_feature`` because
+        that helper also performs Normal-To.  Keeping activation and camera
+        verification separate prevents a duplicate orientation pass and makes
+        the recovery state explicit.
+        """
+        feature = self._find_sketch_feature(doc, sketch_name)
+        if feature is None:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                f"Sketch '{sketch_name}' disappeared before view verification",
+                details={"sketch": sketch_name,
+                         "recovery": "feature_not_found"})
+
+        try:
+            doc.ClearSelection2(True)
+        except Exception:
+            pass
+
+        try:
+            selected = bool(feature.Select2(False, 0))
+        except Exception:
+            selected = select_by_id2(doc, sketch_name, "SKETCH")
+        if not selected:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                f"Sketch '{sketch_name}' could not be selected for reactivation",
+                details={"sketch": sketch_name,
+                         "recovery": "selection_failed"})
+
+        manager = com_get(doc, "SketchManager", default=None)
+        if manager is None:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                "SketchManager is unavailable during sketch reactivation",
+                details={"sketch": sketch_name,
+                         "recovery": "sketch_manager_unavailable"})
+        try:
+            manager.InsertSketch(True)
+        except Exception as exc:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                f"Sketch '{sketch_name}' could not be reactivated: {exc}",
+                details={"sketch": sketch_name,
+                         "recovery": "insert_sketch_failed",
+                         "exception": str(exc)}) from exc
+
+        refreshed_doc, active = self._wait_for_active_sketch(doc, 1.0)
+        if active is None:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                f"Sketch '{sketch_name}' did not become active after rebuild",
+                details={"sketch": sketch_name,
+                         "recovery": "active_sketch_not_published"})
+
+        active_feature = com_get(active, "GetFeature", default=None)
+        active_name = str(com_get(
+            active_feature, "Name", default="") or "")
+        if active_name and active_name != sketch_name:
+            raise _SketchValidationError(
+                "SKETCH_ACTIVE_STATE_LOST",
+                f"Reactivation opened '{active_name}' instead of '{sketch_name}'",
+                details={"sketch": sketch_name,
+                         "active_sketch": active_name,
+                         "recovery": "wrong_sketch_activated"})
+        return refreshed_doc, active
+
+    def _auto_normal_to(self, doc, zoom_to_fit=True):
+        """Recover the owned sketch edit context before view verification.
+
+        The recovery is intentionally scoped to ``create_parametric_sketch``:
+        outside that operation no expected sketch name is installed and view
+        behavior remains identical to upstream 6.5.31.
+        """
+        expected = getattr(
+            self, "_sw2026_expected_active_sketch_name", None)
+        manager = com_get(doc, "SketchManager", default=None)
+        active = com_get(manager, "ActiveSketch", default=None)
+
+        if active is None and expected:
+            # During the initial create_sketch() call the requested final name
+            # has not been applied yet.  Only recover when that named feature
+            # already exists; otherwise preserve the upstream startup behavior.
+            feature = self._find_sketch_feature(doc, expected)
+            if feature is not None:
+                doc, active = self._reactivate_expected_sketch(doc, expected)
+
+        return super()._auto_normal_to(doc, zoom_to_fit=zoom_to_fit)
 
     def _refresh_record_points(self, record):
         """Re-acquire SketchPoint wrappers from the owning sketch segment.
