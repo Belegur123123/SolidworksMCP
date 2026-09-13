@@ -13,6 +13,7 @@ from .more_features import MoreFeatureOperations
 from .bodies import BodyOperations
 from .body_identity import register_identity_tools
 from .body_identity_resilient import BodyIdentityOperations
+from .cut_direction import CutDirectionOperations, register_cut_direction_tools
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
 from .transactions_semantic import TransactionOperations
@@ -22,22 +23,26 @@ from .vectorization import ImageSketchOperations
 from .high_level import HighLevelOperations
 
 
-# server.py imports automation before tool_registry. Register the semantic body
-# identity tools here so the existing generic v6 dispatch path exposes them
-# without duplicating the large legacy server dispatch table.
+# server.py imports automation before tool_registry. Register semantic identity
+# first, then extend semantic_cut with the deterministic direction preflight and
+# expose the read-only resolver without duplicating the legacy dispatch table.
 register_identity_tools()
+register_cut_direction_tools()
 
 
 # MoreFeatureOperations precedes FeatureOperations so its improved
 # fillet_edges/chamfer_edges (ray edge selection) win over the legacy ones.
+# CutDirectionOperations precedes BodyIdentityOperations so its semantic_cut
+# wrapper can perform the read-only direction preflight and then delegate to the
+# existing resilient semantic identity implementation through cooperative MRO.
 class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
                            TransactionOperations, DimensionUpdateOperations,
                            ParametricSketchOperations, ImageSketchOperations,
                            HighLevelOperations, SketchOperations,
                            MoreFeatureOperations, FeatureOperations,
-                           AdvancedFeatureOperations, BodyIdentityOperations,
-                           BodyOperations, GeometryProbeOperations,
-                           ViewOperations):
+                           AdvancedFeatureOperations, CutDirectionOperations,
+                           BodyIdentityOperations, BodyOperations,
+                           GeometryProbeOperations, ViewOperations):
     """
     Complete SolidWorks automation class
 
@@ -47,6 +52,7 @@ class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
     - Sketches: Create sketches, draw 2D geometry
     - Features: Extrude, cut, fillet, chamfer, list
     - AdvancedFeatures: delete/rename/status, advanced_extrude/advanced_cut
+    - CutDirection: read-only sketch/body direction preflight for semantic cuts
     - BodyIdentity: durable body:<id> resolution and semantic_extrude/cut
     - Bodies: list/show/hide/rename/transparency
     - GeometryProbe: probe_ray(s), select_face_by_ray, sketch_contour
@@ -70,6 +76,7 @@ __all__ = [
     "SketchOperations",
     "FeatureOperations",
     "AdvancedFeatureOperations",
+    "CutDirectionOperations",
     "BodyIdentityOperations",
     "MoreFeatureOperations",
     "BodyOperations",
