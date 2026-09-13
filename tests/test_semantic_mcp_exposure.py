@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from solidworks_mcp.server import list_tools
+from solidworks_mcp.server import list_tools, server
 from solidworks_mcp import tool_registry
 
 
@@ -24,6 +24,17 @@ class SemanticMcpExposureTests(unittest.TestCase):
         self.assertTrue(
             SEMANTIC_TOOL_NAMES.issubset(tools),
             f"Missing semantic MCP tools: {sorted(SEMANTIC_TOOL_NAMES - set(tools))}",
+        )
+
+    def test_low_level_server_cache_contains_semantic_identity_tools(self):
+        # mcp.server.lowlevel.Server caches the concrete tool definitions used
+        # to answer ListTools requests.  This is a stronger boundary check than
+        # inspecting NEW_TOOLS alone and catches decorator/cache regressions.
+        cache = getattr(server, "_tool_cache", {})
+        self.assertTrue(
+            SEMANTIC_TOOL_NAMES.issubset(cache),
+            f"Missing semantic tools from low-level MCP cache: "
+            f"{sorted(SEMANTIC_TOOL_NAMES - set(cache))}",
         )
 
     def test_semantic_tool_schemas_are_callable_without_legacy_name_scope(self):
