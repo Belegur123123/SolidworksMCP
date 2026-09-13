@@ -24,6 +24,14 @@ class SemanticIdentityTransactionTests(unittest.TestCase):
                 "list_body_identities", "semantic_extrude", "semantic_cut"):
             self.assertTrue(callable(getattr(SolidWorksAutomation, name, None)))
 
+    def test_public_semantic_cut_uses_resilient_resolver(self):
+        self.assertEqual(
+            SolidWorksAutomation.semantic_cut.__module__,
+            "solidworks_mcp.automation.body_identity_resilient")
+        self.assertEqual(
+            SolidWorksAutomation._find_body_by_identity.__module__,
+            "solidworks_mcp.automation.body_identity_resilient")
+
 
 if __name__ == "__main__":
     unittest.main()
