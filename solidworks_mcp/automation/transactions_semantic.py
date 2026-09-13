@@ -49,6 +49,22 @@ class TransactionOperations(_BaseTransactionOperations):
             }
 
         data = result.setdefault("data", {})
+        direction_tools = {
+            tool.name: tool for tool in tool_registry.NEW_TOOLS
+            if tool.name in ("resolve_cut_direction", "semantic_cut")}
+        semantic_cut = direction_tools.get("semantic_cut")
+        properties = semantic_cut.inputSchema.get("properties", {}) if semantic_cut else {}
+        data["cut_direction_preflight"] = {
+            "available": callable(getattr(self, "resolve_cut_direction", None)),
+            "resolver_registered": "resolve_cut_direction" in direction_tools,
+            "resolver_mutating": "resolve_cut_direction" in tool_registry.MUTATING_TOOLS,
+            "semantic_cut_mutating": "semantic_cut" in tool_registry.MUTATING_TOOLS,
+            "semantic_cut_implementation": self.semantic_cut.__module__,
+            "direction_parameters": {key: properties.get(key) for key in (
+                "direction_flip", "direction_mode", "direction_tolerance")},
+            "low_level_resolver_cached": (
+                "resolve_cut_direction" in cache if isinstance(cache, dict) else None),
+        }
         data["semantic_body_identity"] = {
             "available": all(callable(getattr(self, name, None))
                              for name in _SEMANTIC_IDENTITY_TOOLS),

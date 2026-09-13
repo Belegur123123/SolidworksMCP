@@ -96,6 +96,92 @@ class _Harness(BodyIdentityOperations):
 
 
 class SemanticIdentityResilienceTests(unittest.TestCase):
+    def test_post_cut_identity_failure_rolls_back_and_rehydrates_identity(self):
+        class RollbackHarness(_Harness):
+            def advanced_cut(self, **kwargs):
+                result = super().advanced_cut(**kwargs)
+                self.original_body = self.doc.bodies[0]
+                self.doc.bodies = []
+                self.doc.features.append(SimpleNamespace(Name='F_cut'))
+                return result
+
+            def _delete_feature_object(self, doc, feature, name, delete_absorbed):
+                self.rollback_delete_absorbed = delete_absorbed
+                doc.features.remove(feature)
+                doc.bodies = [self.original_body]
+                return True
+
+        automation = RollbackHarness(_Doc([_Body('B_insert_main')]))
+        result = automation.semantic_cut(['body:insert_main'], direction_mode='auto_material_side')
+        self.assertFalse(result['success'])
+        self.assertEqual(result['data']['error']['code'], 'INVARIANT_FAILED')
+        self.assertTrue(result['data']['semantic_identity_rollback']['feature_deleted'])
+        self.assertFalse(automation.rollback_delete_absorbed)
+        self.assertEqual(automation.doc.features, [])
+        body, record, error = automation._find_body_by_identity(automation.doc, 'body:insert_main')
+        self.assertIsNone(error)
+        self.assertEqual(record['current_name'], 'B_insert_main')
+        self.assertEqual(len(automation.cut_calls), 1)
+
+    def test_failed_feature_deletion_is_not_reported_as_restored(self):
+        class FailedRollbackHarness(_Harness):
+            def advanced_cut(self, **kwargs):
+                result = super().advanced_cut(**kwargs)
+                self.doc.bodies = []
+                self.doc.features.append(SimpleNamespace(Name='F_cut'))
+                return result
+
+            def _delete_feature_object(self, *args, **kwargs):
+                return False
+
+        automation = FailedRollbackHarness(_Doc([_Body('B_insert_main')]))
+        result = automation.semantic_cut(['body:insert_main'])
+        self.assertFalse(result['success'])
+        self.assertFalse(result['data']['semantic_identity_rollback']['feature_deleted'])
+        self.assertFalse(result['data']['error']['document_restored'])
+
+    def test_explicit_direction_is_forwarded_without_resolver(self):
+        for flag in (False, True):
+            with self.subTest(flag=flag):
+                automation = _Harness(_Doc([_Body('B_insert_main')]))
+                result = automation.semantic_cut(['body:insert_main'], direction_flip=flag,
+                                                 direction_mode='explicit')
+                self.assertTrue(result['success'], result)
+                self.assertEqual(automation.direction_calls, [])
+                self.assertEqual(len(automation.cut_calls), 1)
+                self.assertIs(automation.cut_calls[0]['direction_flip'], flag)
+
+    def test_failed_auto_preflight_never_calls_cut(self):
+        automation = _Harness(_Doc([_Body('B_insert_main')]))
+        automation.resolve_cut_direction = lambda **kw: automation._error(
+            'INVALID_PLAN', 'ambiguous', stage='validate_geometry')
+        result = automation.semantic_cut(['body:insert_main'], direction_mode='auto_material_side')
+        self.assertFalse(result['success'])
+        self.assertEqual(automation.cut_calls, [])
+        self.assertEqual(automation._body_names(automation.doc), ['B_insert_main'])
+
+    def test_malformed_successful_preflight_never_calls_cut(self):
+        for value in (None, 0, 'false'):
+            with self.subTest(value=value):
+                automation = _Harness(_Doc([_Body('B_insert_main')]))
+                automation.resolve_cut_direction = lambda **kw: automation._result(
+                    True, 'malformed', data={'direction_flip': value})
+                result = automation.semantic_cut(['body:insert_main'], direction_mode='auto_material_side')
+                self.assertFalse(result['success'])
+                self.assertEqual(result['data']['error']['code'], 'INVARIANT_FAILED')
+                self.assertEqual(automation.cut_calls, [])
+
+    def test_auto_rejects_retry_flags_and_shifted_start_before_geometry(self):
+        for args in ({'auto_flags': True}, {'start_condition': 'offset'},
+                     {'start_offset': 2}, {'start_face_ray': {}}):
+            with self.subTest(args=args):
+                automation = _Harness(_Doc([_Body('B_insert_main')]))
+                result = automation.semantic_cut(['body:insert_main'],
+                                                 direction_mode='auto_material_side', **args)
+                self.assertFalse(result['success'])
+                self.assertEqual(automation.cut_calls, [])
+                self.assertEqual(automation.direction_calls, [])
+
     def test_canonical_body_wins_over_stale_session_name(self):
         canonical = _Body("B_insert_main")
         stale_name_reused = _Body(

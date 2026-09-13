@@ -43,6 +43,15 @@ class SemanticIdentityTransactionTests(unittest.TestCase):
         self.assertEqual(capability["canonical_body_prefix"], "B_")
         self.assertTrue(
             capability["client_schema_refresh_required_after_toolset_change"])
+        direction = result['data']['cut_direction_preflight']
+        self.assertTrue(direction['available'])
+        self.assertTrue(direction['resolver_registered'])
+        self.assertFalse(direction['resolver_mutating'])
+        self.assertTrue(direction['semantic_cut_mutating'])
+        self.assertEqual(direction['semantic_cut_implementation'],
+                         'solidworks_mcp.automation.body_identity_resilient')
+        self.assertEqual(direction['direction_parameters']['direction_mode']['enum'],
+                         ['explicit', 'auto_material_side'])
 
 
 if __name__ == "__main__":

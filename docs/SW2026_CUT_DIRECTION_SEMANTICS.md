@@ -69,3 +69,21 @@ feature count: 21
 ## Error classification
 
 A rejected `FeatureCut4` call that returns no feature without a COM exception or HRESULT is a feature-creation failure, not evidence that the COM member is missing or mismatched. The runtime therefore classifies `Cut failed on sketch ...` and `Extrude failed on sketch ...` as `FEATURE_CREATE_FAILED`. `COM_MEMBER_MISMATCH` remains the fallback for genuinely unknown COM automation failures.
+# Auto-mode input safety
+
+`auto_material_side` requires `auto_flags=false` and an unshifted
+`start_condition="sketch_plane"` with zero `start_offset` and no
+`start_face_ray`. Other start conditions require `explicit` mode because the
+current classifier proves material side relative to the sketch plane only.
+The explicit path keeps forwarding the requested direction unchanged.
+
+The resolver rejects negative or non-finite tolerance, non-finite sketch
+transforms, and malformed, inverted, or non-finite body bounding boxes before
+feature creation. The wrapper also rejects a successful resolver response that
+lacks a boolean direction; a missing flag must never silently mean false.
+
+Bounding-box classification proves a material half-space only. It does not
+prove that the profile intersects that material or that a requested depth/end
+condition is realizable. Feature rejection must still be reported and geometry
+verified after creation. Complex or oblique geometry can be conservatively
+ambiguous. No ray-based fallback or trial feature is used.

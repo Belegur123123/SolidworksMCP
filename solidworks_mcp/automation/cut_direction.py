@@ -18,6 +18,7 @@ multiple scoped bodies disagree, the resolver fails closed instead of guessing.
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List, Optional
 
 from mcp.types import Tool
@@ -55,6 +56,7 @@ def register_cut_direction_tools() -> None:
                         "description": "Existing closed sketch feature name"},
                     "direction_tolerance": {
                         "type": "number",
+                        "minimum": 0,
                         "default": 0.01,
                         "description": "Plane-side tolerance in user units"},
                     "unit": {"type": "string"},
@@ -72,6 +74,10 @@ def register_cut_direction_tools() -> None:
         if tool.name != "semantic_cut":
             continue
         props = tool.inputSchema.setdefault("properties", {})
+        props.setdefault("direction_flip", {"type": "boolean"})["description"] = (
+            "For CUTS: false = opposite sketch normal; true = along sketch "
+            "normal. Do not equate this with Boss-Extrude direction. "
+            "auto_material_side overrides this flag before feature creation.")
         props["direction_mode"] = {
             "type": "string",
             "enum": list(_DIRECTION_MODES),
@@ -82,6 +88,7 @@ def register_cut_direction_tools() -> None:
                 "body side; prefer this for blind face-sketch cuts.")}
         props["direction_tolerance"] = {
             "type": "number",
+            "minimum": 0,
             "default": 0.01,
             "description": "Plane-side tolerance in user units for auto mode"}
         break
@@ -92,10 +99,17 @@ class CutDirectionOperations:
 
     @staticmethod
     def _bbox_corners(box):
-        if not box or len(box) < 6:
+        if box is None or len(box) != 6:
             return []
-        lo = [float(box[index]) for index in range(3)]
-        hi = [float(box[index + 3]) for index in range(3)]
+        try:
+            values = [float(value) for value in box]
+        except (TypeError, ValueError, OverflowError):
+            return []
+        if not all(math.isfinite(value) for value in values):
+            return []
+        lo, hi = values[:3], values[3:]
+        if any(lower > upper for lower, upper in zip(lo, hi)):
+            return []
         return [(x, y, z)
                 for x in (lo[0], hi[0])
                 for y in (lo[1], hi[1])
@@ -131,8 +145,14 @@ class CutDirectionOperations:
                 details={"sketch_name": sketch_name})
 
         try:
+            if not all(math.isfinite(float(value))
+                       for value in list(data) + list(inverse_data)):
+                raise ValueError("Sketch transform contains non-finite values")
             basis = self._orientation_basis(data)
             origin = transform_point(inverse_data, (0.0, 0.0, 0.0))
+            if not all(math.isfinite(float(value))
+                       for value in tuple(origin) + tuple(basis["toward_viewer"])):
+                raise ValueError("Sketch plane contains non-finite values")
         except Exception as exc:
             return None, self._error(
                 "REFERENCE_MISMATCH",
@@ -161,8 +181,12 @@ class CutDirectionOperations:
                 "INVALID_PLAN", "sketch_name is required",
                 stage="validate_plan", recoverable=True)
         try:
-            tolerance_m = abs(float(self._units.to_meters(
-                direction_tolerance, unit)))
+            tolerance = float(direction_tolerance)
+            if not math.isfinite(tolerance) or tolerance < 0:
+                raise ValueError("Tolerance must be finite and nonnegative")
+            tolerance_m = float(self._units.to_meters(tolerance, unit))
+            if not math.isfinite(tolerance_m) or tolerance_m < 0:
+                raise ValueError("Converted tolerance must be finite and nonnegative")
         except Exception as exc:
             return self._error(
                 "INVALID_PLAN",

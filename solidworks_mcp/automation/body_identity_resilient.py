@@ -148,6 +148,15 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
                 stage="validate_plan", recoverable=True,
                 details={"direction_mode": direction_mode})
 
+        if direction_mode == "auto_material_side" and (
+                auto_flags or start_condition != "sketch_plane"
+                or start_offset != 0.0 or start_face_ray is not None):
+            return self._error(
+                "INVALID_PLAN",
+                "auto_material_side requires auto_flags=false and an unshifted "
+                "sketch-plane start; use explicit mode for other start conditions",
+                stage="validate_plan", recoverable=True)
+
         doc, err = self.get_active_doc()
         if err:
             return err
@@ -186,8 +195,14 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
                 unit=unit)
             if not direction_preflight.get("success"):
                 return direction_preflight
-            effective_direction = bool(
-                (direction_preflight.get("data") or {}).get("direction_flip"))
+            resolved_direction = (direction_preflight.get("data") or {}).get(
+                "direction_flip")
+            if type(resolved_direction) is not bool:
+                return self._error(
+                    "INVARIANT_FAILED",
+                    "Cut-direction preflight did not return a boolean direction",
+                    stage="validate_invariants", recoverable=False)
+            effective_direction = resolved_direction
 
         result = super().semantic_cut(
             scope_body_ids=scope_body_ids,

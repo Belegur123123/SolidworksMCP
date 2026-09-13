@@ -187,6 +187,74 @@ class CutDirectionTests(unittest.TestCase):
             ["explicit", "auto_material_side"])
         self.assertIn("direction_tolerance", props)
 
+    def test_invalid_tolerance_fails_closed(self):
+        for value in (-0.01, float('nan'), float('inf'), -float('inf')):
+            with self.subTest(value=value):
+                automation = _Harness([-0.07, 0, -0.04, 0.06, 0.02, 0.04])
+                result = automation.resolve_cut_direction(
+                    ['body:insert_main'], 'S_pocket', direction_tolerance=value)
+                self.assertFalse(result['success'])
+                self.assertEqual(result['data']['error']['code'], 'INVALID_PLAN')
+
+    def test_invalid_bbox_fails_closed(self):
+        for box in ([float('nan'), 0, 0, 0.06, 0.02, 0.04],
+                    [0, 0, 0, float('inf'), 0.02, 0.04],
+                    [0.07, 0, 0, 0.06, 0.02, 0.04],
+                    [0, 0, 0, 'bad', 0.02, 0.04], [0, 0, 0]):
+            with self.subTest(box=box):
+                automation = _Harness(box)
+                result = automation.resolve_cut_direction(['body:insert_main'], 'S_pocket')
+                self.assertFalse(result['success'])
+                self.assertEqual(result['data']['error']['stage'], 'validate_geometry')
+
+    def test_nonfinite_transform_fails_closed(self):
+        automation = _Harness([-0.07, 0, -0.04, 0.06, 0.02, 0.04])
+        automation.feature._sketch.ModelToSketchTransform.ArrayData[0] = float('nan')
+        result = automation.resolve_cut_direction(['body:insert_main'], 'S_pocket')
+        self.assertFalse(result['success'])
+        self.assertEqual(result['data']['error']['code'], 'REFERENCE_MISMATCH')
+
+    def test_missing_references_fail_closed(self):
+        for ids, name in [(['body:missing'], 'S_pocket'), (['body:insert_main'], 'missing')]:
+            with self.subTest(ids=ids, name=name):
+                automation = _Harness([-0.07, 0, -0.04, 0.06, 0.02, 0.04])
+                result = automation.resolve_cut_direction(ids, name)
+                self.assertFalse(result['success'])
+                self.assertEqual(result['data']['error']['code'], 'REFERENCE_MISMATCH')
+
+    def test_opposite_scope_sides_fail_closed(self):
+        automation = _Harness([-0.07, 0, -0.04, 0.06, 0.02, 0.04])
+        second = _Body('B_upper', [-0.07, 0.02, -0.04, 0.06, 0.04, 0.04])
+        original = automation._find_body_by_identity
+        automation._find_body_by_identity = lambda doc, body_id: (
+            (second, {'current_name': 'B_upper'}, None) if body_id == 'body:upper'
+            else original(doc, body_id))
+        result = automation.resolve_cut_direction(['body:insert_main', 'body:upper'], 'S_pocket')
+        self.assertFalse(result['success'])
+        self.assertEqual(result['data']['error']['code'], 'INVALID_PLAN')
+        self.assertEqual(len(result['data']['error']['details']['body_sides']), 2)
+
+    def test_unit_conversion_preserves_direction(self):
+        for unit, tolerance, expected in [('mm', 0.01, -20), ('m', 0.00001, -0.02),
+                                           ('inch', 0.01 / 25.4, -20 / 25.4)]:
+            with self.subTest(unit=unit):
+                automation = _Harness([-0.07, 0, -0.04, 0.06, 0.02, 0.04])
+                result = automation.resolve_cut_direction(['body:insert_main'], 'S_pocket', tolerance, unit)
+                self.assertTrue(result['success'], result)
+                self.assertFalse(result['data']['direction_flip'])
+                self.assertAlmostEqual(result['data']['bodies'][0]['min_signed_distance'], expected)
+
+    def test_registration_is_idempotent_and_documents_cut_rule(self):
+        register_identity_tools()
+        register_cut_direction_tools()
+        register_cut_direction_tools()
+        for name in ('semantic_cut', 'resolve_cut_direction'):
+            self.assertEqual(sum(tool.name == name for tool in tool_registry.NEW_TOOLS), 1)
+        tool = next(tool for tool in tool_registry.NEW_TOOLS if tool.name == 'semantic_cut')
+        description = tool.inputSchema['properties']['direction_flip']['description']
+        self.assertIn('false = opposite sketch normal', description)
+        self.assertIn('true = along sketch normal', description)
+
 
 if __name__ == "__main__":
     unittest.main()
