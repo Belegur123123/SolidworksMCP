@@ -1,0 +1,170 @@
+import unittest
+from types import SimpleNamespace
+
+from solidworks_mcp.automation.body_identity_resilient import BodyIdentityOperations
+from solidworks_mcp.automation.runtime import structured_error
+from solidworks_mcp.constants import SwErrors
+
+
+class _Configuration:
+    def __init__(self, name):
+        self.Name = name
+
+
+class _ConfigurationManager:
+    def __init__(self, name):
+        self.ActiveConfiguration = _Configuration(name)
+
+
+class _Body:
+    def __init__(self, name, box=None, faces=6):
+        self.Name = name
+        self._box = box or [0.0, 0.0, 0.0, 0.1, 0.02, 0.08]
+        self._faces = faces
+
+    def GetBodyBox(self):
+        return list(self._box)
+
+    def GetFaceCount(self):
+        return self._faces
+
+
+class _Doc:
+    def __init__(self, bodies=None, configuration="Default"):
+        self.bodies = list(bodies or [])
+        self.features = []
+        self.ConfigurationManager = _ConfigurationManager(configuration)
+
+
+class _Harness(BodyIdentityOperations):
+    def __init__(self, doc):
+        self.doc = doc
+        self._runtime = SimpleNamespace(body_identities={})
+        self.cut_calls = []
+
+    def get_active_doc(self):
+        return self.doc, None
+
+    def _get_doc_path(self, doc):
+        return r"C:\Temp\IdentityTest.SLDPRT"
+
+    def _get_doc_title(self, doc):
+        return "IdentityTest.SLDPRT"
+
+    def _get_solid_bodies(self, doc, include_hidden=True):
+        return list(doc.bodies)
+
+    def _find_body(self, doc, name):
+        return next((body for body in doc.bodies if body.Name == name), None)
+
+    def _body_names(self, doc):
+        return [body.Name for body in doc.bodies]
+
+    def _find_feature(self, doc, name):
+        return next((feature for feature in doc.features
+                     if getattr(feature, "Name", None) == name), None)
+
+    def _feature_names(self, doc):
+        return [feature.Name for feature in doc.features]
+
+    def _result(self, success, message, error_code=SwErrors.swSuccess, data=None):
+        return {
+            "success": bool(success),
+            "message": message,
+            "error_code": int(error_code),
+            "error_name": error_code.name,
+            "data": dict(data or {}),
+        }
+
+    def _error(self, code, message, **kwargs):
+        data = dict(kwargs.pop("data", {}) or {})
+        data["error"] = structured_error(code, message, **kwargs)
+        return self._result(False, message, SwErrors.swUnknownError, data)
+
+    # Override the base semantic_cut so this test can prove that resilient
+    # preflight blocks noncanonical state before any mutation path is entered.
+    def advanced_cut(self, **kwargs):
+        self.cut_calls.append(dict(kwargs))
+        return self._result(True, "cut", data={"feature_name": "F_cut"})
+
+
+class SemanticIdentityResilienceTests(unittest.TestCase):
+    def test_canonical_body_wins_over_stale_session_name(self):
+        canonical = _Body("B_insert_main")
+        stale_name_reused = _Body(
+            "OldBody", box=[0.0, 0.0, 0.0, 0.2, 0.02, 0.08])
+        automation = _Harness(_Doc([canonical, stale_name_reused]))
+        key = automation._identity_document_key(automation.doc)
+        automation._runtime.body_identities[(key, "body:insert_main")] = {
+            "logical_id": "body:insert_main",
+            "current_name": "OldBody",
+            "canonical_name": "B_insert_main",
+            "role": "main_insert_body",
+            "signature": {"bbox_m": [0.0, 0.0, 0.0, 0.1, 0.02, 0.08],
+                          "face_count": 6},
+        }
+
+        body, record, error = automation._find_body_by_identity(
+            automation.doc, "body:insert_main")
+
+        self.assertIsNone(error)
+        self.assertIs(body, canonical)
+        self.assertEqual(record["resolved_by"], "canonical_name")
+        self.assertEqual(record["current_name"], "B_insert_main")
+
+    def test_stale_session_name_must_match_recorded_signature(self):
+        replacement = _Body(
+            "OldBody", box=[0.0, 0.0, 0.0, 0.2, 0.02, 0.08])
+        actual = _Body(
+            "RenamedActual", box=[0.0, 0.0, 0.0, 0.1, 0.02, 0.08])
+        automation = _Harness(_Doc([replacement, actual]))
+        key = automation._identity_document_key(automation.doc)
+        automation._runtime.body_identities[(key, "body:insert_main")] = {
+            "logical_id": "body:insert_main",
+            "current_name": "OldBody",
+            "canonical_name": "B_insert_main",
+            "role": None,
+            "signature": {"bbox_m": [0.0, 0.0, 0.0, 0.1, 0.02, 0.08],
+                          "face_count": 6},
+        }
+
+        body, record, error = automation._find_body_by_identity(
+            automation.doc, "body:insert_main")
+
+        self.assertIsNone(error)
+        self.assertIs(body, actual)
+        self.assertEqual(record["resolved_by"], "geometry_signature")
+        self.assertEqual(record["current_name"], "RenamedActual")
+
+    def test_registry_isolated_by_active_configuration(self):
+        doc = _Doc([_Body("B_insert_main")], configuration="Default")
+        automation = _Harness(doc)
+        default_key = automation._identity_document_key(doc)
+        doc.ConfigurationManager.ActiveConfiguration = _Configuration("Print")
+        print_key = automation._identity_document_key(doc)
+
+        self.assertNotEqual(default_key, print_key)
+        self.assertIn("::config:default", default_key)
+        self.assertIn("::config:print", print_key)
+
+    def test_semantic_cut_rejects_noncanonical_scope_before_advanced_cut(self):
+        legacy = _Body("LegacyBody")
+        automation = _Harness(_Doc([legacy]))
+        automation._record_body_identity(
+            automation.doc, "body:insert_main", legacy,
+            source="explicit_noncanonical")
+
+        result = automation.semantic_cut(
+            scope_body_ids=["body:insert_main"],
+            sketch_name="S_pocket",
+            feature_name="F_pocket",
+            depth=15,
+            unit="mm")
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["data"]["error"]["code"], "REFERENCE_MISMATCH")
+        self.assertEqual(automation.cut_calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
