@@ -11,7 +11,8 @@ from .features import FeatureOperations
 from .advanced_features_sw2026 import AdvancedFeatureOperations
 from .more_features import MoreFeatureOperations
 from .bodies import BodyOperations
-from .body_identity import BodyIdentityOperations, register_identity_tools
+from .body_identity import register_identity_tools
+from .body_identity_resilient import BodyIdentityOperations
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
 from .transactions_semantic import TransactionOperations
