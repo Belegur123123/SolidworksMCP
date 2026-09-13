@@ -434,3 +434,18 @@ Lokaler Fix: Nach `OpenDoc6()` wird der aktive Dokumentpfad geprueft; bei Abweic
 **225 Tests, 0 Fehler, 0 Skips.**
 
 Die zwei aktuell noch nicht im laufenden MCP-Prozess geladenen Codeaenderungen sind: `min_fill=0.25` fuer sichtbare schlanke Sketches und die verifizierte Dokumentaktivierung in `open_document()`. Beide sind lokal regressionsgetestet; die Live-Abnahme folgt nach dem naechsten MCP/Tunnel-Neustart.
+
+## P1-A/B - Kombinierter Constraint-/Dimensionstest
+
+**Status: PASS.**
+
+Produktionsnaher Testsketch `S_combined_insert_layout` auf Front Plane:
+
+- 4 Linien als 100 x 60 mm Rechteck,
+- 1 Kreis/Fingerzugriff mit 20 mm Durchmesser,
+- 6 explizite Relationen (Horizontal, Vertical und Equal),
+- 3 Driving-Dimensionen: 100 mm Breite, 60 mm Hoehe, 20 mm Durchmesser,
+- 2 geschlossene Konturen,
+- ein Rebuild, keine Solver-/Topologiefehler.
+
+Der native Geometry-Export bestaetigte nach Erstellung und erneut nach Save/Close/Reopen unveraendert 5 Entities, 2 geschlossene Konturen, 9 native Relationen und 3 Dimensionen mit `driven_state=2` (driving) und Werten 100/60/20 mm. Der Sketch bleibt bewusst `under_defined`, da seine absolute Lage nicht kuenstlich per Fix-Constraint gesperrt wurde.
