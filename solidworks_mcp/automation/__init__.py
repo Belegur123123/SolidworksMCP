@@ -8,7 +8,7 @@ from .base import SolidWorksAutomation as _BaseAutomation
 from .documents import DocumentOperations
 from .sketches import SketchOperations
 from .features import FeatureOperations
-from .advanced_features import AdvancedFeatureOperations
+from .advanced_features_sw2026 import AdvancedFeatureOperations
 from .more_features import MoreFeatureOperations
 from .bodies import BodyOperations
 from .geometry_probe import GeometryProbeOperations
