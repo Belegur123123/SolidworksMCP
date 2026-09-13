@@ -23,8 +23,18 @@ from .parametric import (
 class ParametricSketchOperations(_BaseParametricSketchOperations):
     """Parametric backend with SW2026-safe sketch lifecycle handling."""
 
-    def create_parametric_sketch(self, name: str, *args, **kwargs):
+    def create_parametric_sketch(self, name: str, plane: str = "Front",
+                                 entities=None, constraints=None,
+                                 dimensions=None, equations=None, solve=None,
+                                 validation=None, transaction=None, unit=None,
+                                 idempotency_key=None, output_mode=None):
         """Expose the sketch name to bounded SW2026 lifecycle recovery.
+
+        Keep the public signature identical to the upstream method.  The MCP
+        dispatcher filters incoming arguments through ``inspect.signature``;
+        replacing these named parameters with ``*args``/``**kwargs`` therefore
+        drops valid tool arguments such as ``entities`` before this method is
+        invoked.
 
         ``create_parametric_sketch`` in the upstream backend creates and renames
         the sketch before its one mandatory ``EditRebuild3``.  On SW2026 SP0
@@ -38,7 +48,20 @@ class ParametricSketchOperations(_BaseParametricSketchOperations):
             self, "_sw2026_expected_active_sketch_name", sentinel)
         self._sw2026_expected_active_sketch_name = str(name)
         try:
-            return super().create_parametric_sketch(name, *args, **kwargs)
+            return super().create_parametric_sketch(
+                name=name,
+                plane=plane,
+                entities=entities,
+                constraints=constraints,
+                dimensions=dimensions,
+                equations=equations,
+                solve=solve,
+                validation=validation,
+                transaction=transaction,
+                unit=unit,
+                idempotency_key=idempotency_key,
+                output_mode=output_mode,
+            )
         finally:
             if previous is sentinel:
                 try:
