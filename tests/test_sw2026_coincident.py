@@ -1,5 +1,6 @@
 """Regression tests for the SOLIDWORKS 2026 parametric-sketch fixes."""
 
+import inspect
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +10,7 @@ from solidworks_mcp.automation.parametric import (
     _SketchValidationError,
 )
 from solidworks_mcp.automation.runtime import ERROR_DEFAULTS
+from solidworks_mcp.tool_registry import dispatch_new_tool
 
 
 class FakePoint:
@@ -179,6 +181,58 @@ class Sw2026CoincidentTests(unittest.TestCase):
         self.assertEqual(
             ERROR_DEFAULTS["SKETCH_ACTIVE_STATE_LOST"],
             ("solve", True))
+
+    def test_wrapper_preserves_upstream_dispatch_signature(self):
+        wrapper_parameters = list(inspect.signature(
+            self.ops.create_parametric_sketch).parameters)
+        upstream_parameters = list(inspect.signature(
+            UpstreamParametricSketchOperations.create_parametric_sketch
+        ).parameters)[1:]
+        self.assertEqual(wrapper_parameters, upstream_parameters)
+        self.assertNotIn("args", wrapper_parameters)
+        self.assertNotIn("kwargs", wrapper_parameters)
+
+    def test_dispatch_preserves_parametric_payload(self):
+        payload = {
+            "name": "DispatchTarget",
+            "plane": "Top",
+            "unit": "mm",
+            "entities": [{
+                "id": "a", "type": "line",
+                "start": [0, 0], "end": [10, 0],
+            }],
+            "constraints": [{
+                "type": "coincident",
+                "entities": ["a.end", "a.start"],
+            }],
+            "dimensions": [{"id": "D1", "entity": "a"}],
+            "equations": [{"dimension": "D1", "equation": "10mm"}],
+            "solve": {"target": "fully_defined"},
+            "validation": {"require_closed": False},
+            "transaction": {"rollback_on_failure": True},
+            "idempotency_key": "dispatch-regression",
+            "output_mode": "minimal_parametric",
+        }
+
+        def fake_create(instance, **kwargs):
+            return {
+                "expected": getattr(
+                    instance, "_sw2026_expected_active_sketch_name", None),
+                "received": kwargs,
+            }
+
+        with patch.object(
+                UpstreamParametricSketchOperations,
+                "create_parametric_sketch",
+                autospec=True,
+                side_effect=fake_create):
+            result = dispatch_new_tool(
+                self.ops, "create_parametric_sketch", payload)
+
+        self.assertEqual(result["expected"], "DispatchTarget")
+        self.assertEqual(result["received"], payload)
+        self.assertFalse(hasattr(
+            self.ops, "_sw2026_expected_active_sketch_name"))
 
     def test_parametric_call_scopes_expected_sketch_name(self):
         def fake_create(instance, name, *args, **kwargs):
