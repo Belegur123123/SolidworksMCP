@@ -27,6 +27,7 @@ ERROR_DEFAULTS = {
     "MODAL_DIALOG_BLOCKING": ("ui_guard", True),
     "FREEZE_BAR_STATE_INVALID": ("preflight", True),
     "COM_MEMBER_MISMATCH": ("com_call", True),
+    "FEATURE_CREATE_FAILED": ("create_feature", True),
     "SKETCH_UNDERDEFINED": ("solve", True),
     "SKETCH_OVERDEFINED": ("solve", True),
     "SKETCH_CONSTRAINT_UNVERIFIED": ("solve", True),
@@ -93,6 +94,8 @@ def enrich_legacy_error(result: Dict[str, Any]) -> Dict[str, Any]:
     mappings = [
         ("DEAD FEATURE", "FEATURE_DEAD"),
         ("0 FACES", "FEATURE_DEAD"),
+        ("CUT FAILED ON SKETCH", "FEATURE_CREATE_FAILED"),
+        ("EXTRUDE FAILED ON SKETCH", "FEATURE_CREATE_FAILED"),
         ("OUTSIDE THE EXPECTED", "FEATURE_WRONG_BBOX"),
         ("MERGED UNEXPECTED", "UNEXPECTED_BODY_MERGE"),
         ("INTERFERENCE", "BODY_INTERFERENCE"),
@@ -104,8 +107,22 @@ def enrich_legacy_error(result: Dict[str, Any]) -> Dict[str, Any]:
     ]
     code = next((candidate for needle, candidate in mappings
                  if needle in upper), "COM_MEMBER_MISMATCH")
+    likely_causes = []
+    recommended_actions = []
+    if code == "FEATURE_CREATE_FAILED":
+        likely_causes = [
+            "The requested feature does not intersect the target body in the chosen direction.",
+            "The selected profile, feature scope, start condition, or end condition is infeasible.",
+            "SOLIDWORKS rejected the feature while the COM member itself remained callable.",
+        ]
+        recommended_actions = [
+            "Verify cut direction against the sketch normal: SOLIDWORKS cuts opposite the sketch normal by default; direction_flip=true reverses that default.",
+            "Verify profile and body-scope selections and use expected_bbox to validate the resulting feature location.",
+        ]
     data["error"] = structured_error(
         code, message, com_hresult=data.get("com_hresult"),
+        likely_causes=likely_causes,
+        recommended_actions=recommended_actions,
         details={"legacy_error_code": result.get("error_code"),
                  "legacy_error_name": result.get("error_name")})
     return result
