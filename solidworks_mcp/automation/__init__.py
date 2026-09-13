@@ -14,7 +14,7 @@ from .bodies import BodyOperations
 from .body_identity import BodyIdentityOperations, register_identity_tools
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
-from .transactions import TransactionOperations
+from .transactions_semantic import TransactionOperations
 from .dimension_update import DimensionUpdateOperations
 from .parametric_sw2026 import ParametricSketchOperations
 from .vectorization import ImageSketchOperations
