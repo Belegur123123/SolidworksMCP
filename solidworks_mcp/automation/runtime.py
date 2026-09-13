@@ -30,6 +30,7 @@ ERROR_DEFAULTS = {
     "SKETCH_UNDERDEFINED": ("solve", True),
     "SKETCH_OVERDEFINED": ("solve", True),
     "SKETCH_CONSTRAINT_UNVERIFIED": ("solve", True),
+    "SKETCH_ACTIVE_STATE_LOST": ("solve", True),
     "SKETCH_OPEN_CONTOUR": ("validate_topology", True),
     "SKETCH_SELF_INTERSECTION": ("validate_topology", True),
     "FEATURE_DEAD": ("verify_feature", True),
