@@ -33,8 +33,10 @@ class ParametricSketchOperations(_BaseParametricSketchOperations):
         """
         segment = record.get("object")
         if segment is None:
-            record["points"] = {}
-            return record["points"]
+            # Some deterministic unit tests and callers intentionally provide
+            # point-only records.  There is no owning COM segment to refresh
+            # from in that representation, so retain the supplied points.
+            return record.setdefault("points", {})
         record["points"] = self._entity_points(segment)
         return record["points"]
 
@@ -195,8 +197,10 @@ class ParametricSketchOperations(_BaseParametricSketchOperations):
 
     def _locked_trace_constraints(self, records, constraints):
         # The upstream implementation groups coincident point objects by their
-        # coordinates.  Refresh them first so a previous topology-changing
-        # constraint cannot leave a disconnected SketchPoint wrapper here.
+        # coordinates.  Refresh only records backed by a real owning segment;
+        # deterministic point-only records have nothing to reacquire from and
+        # must preserve their supplied endpoint objects.
         for record in records.values():
-            self._refresh_record_points(record)
+            if record.get("object") is not None:
+                self._refresh_record_points(record)
         return super()._locked_trace_constraints(records, constraints)
