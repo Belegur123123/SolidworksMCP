@@ -14,6 +14,7 @@ from .bodies import BodyOperations
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
 from .transactions import TransactionOperations
+from .dimension_update import DimensionUpdateOperations
 from .parametric_sw2026 import ParametricSketchOperations
 from .vectorization import ImageSketchOperations
 from .high_level import HighLevelOperations
@@ -22,12 +23,12 @@ from .high_level import HighLevelOperations
 # MoreFeatureOperations precedes FeatureOperations so its improved
 # fillet_edges/chamfer_edges (ray edge selection) win over the legacy ones.
 class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
-                           TransactionOperations, ParametricSketchOperations,
-                           ImageSketchOperations, HighLevelOperations,
-                           SketchOperations, MoreFeatureOperations,
-                           FeatureOperations, AdvancedFeatureOperations,
-                           BodyOperations, GeometryProbeOperations,
-                           ViewOperations):
+                           TransactionOperations, DimensionUpdateOperations,
+                           ParametricSketchOperations, ImageSketchOperations,
+                           HighLevelOperations, SketchOperations,
+                           MoreFeatureOperations, FeatureOperations,
+                           AdvancedFeatureOperations, BodyOperations,
+                           GeometryProbeOperations, ViewOperations):
     """
     Complete SolidWorks automation class
 
@@ -64,6 +65,7 @@ __all__ = [
     "GeometryProbeOperations",
     "ViewOperations",
     "TransactionOperations",
+    "DimensionUpdateOperations",
     "ParametricSketchOperations",
     "ImageSketchOperations",
     "HighLevelOperations",
