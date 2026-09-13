@@ -1,6 +1,8 @@
 import asyncio
 import unittest
 
+from mcp import types
+
 from solidworks_mcp.server import list_tools, server
 from solidworks_mcp import tool_registry
 
@@ -19,6 +21,18 @@ class SemanticMcpExposureTests(unittest.TestCase):
         tools = asyncio.run(list_tools())
         return {tool.name: tool for tool in tools}
 
+    def _populate_low_level_tool_cache(self):
+        """Exercise the real MCP ListTools request wrapper.
+
+        Calling the decorated ``list_tools`` function directly intentionally
+        bypasses mcp.server.lowlevel.Server's request wrapper.  The wrapper is
+        what refreshes ``server._tool_cache`` for real MCP ListTools requests,
+        so a cache-boundary regression test must invoke the registered request
+        handler rather than the undecorated callback.
+        """
+        handler = server.request_handlers[types.ListToolsRequest]
+        asyncio.run(handler(types.ListToolsRequest()))
+
     def test_server_list_tools_exposes_all_semantic_identity_tools(self):
         tools = self._tools_by_name()
         self.assertTrue(
@@ -27,9 +41,9 @@ class SemanticMcpExposureTests(unittest.TestCase):
         )
 
     def test_low_level_server_cache_contains_semantic_identity_tools(self):
-        # mcp.server.lowlevel.Server caches the concrete tool definitions used
-        # to answer ListTools requests.  This is a stronger boundary check than
-        # inspecting NEW_TOOLS alone and catches decorator/cache regressions.
+        # The SDK cache is lazy: it is populated by the registered ListTools
+        # request wrapper, not by calling our decorated callback directly.
+        self._populate_low_level_tool_cache()
         cache = getattr(server, "_tool_cache", {})
         self.assertTrue(
             SEMANTIC_TOOL_NAMES.issubset(cache),
