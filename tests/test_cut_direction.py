@@ -83,18 +83,9 @@ class _Doc:
         self.bodies = list(bodies)
 
 
-class _SemanticBase:
-    def semantic_cut(self, **kwargs):
-        self.semantic_calls.append(dict(kwargs))
-        return self._result(True, "semantic cut delegated", data={
-            "feature_name": kwargs.get("feature_name") or "F_test_cut",
-        })
-
-
-class _Harness(CutDirectionOperations, _SemanticBase, ViewOperations):
+class _Harness(CutDirectionOperations, ViewOperations):
     def __init__(self, body_box, sketch_origin_y=0.02):
         self._units = _Units()
-        self.semantic_calls = []
         self.body = _Body("B_insert_main", body_box)
         self.feature = _Feature("S_pocket", _Sketch(sketch_origin_y))
         self.doc = _Doc(self.feature, [self.body])
@@ -167,61 +158,17 @@ class CutDirectionTests(unittest.TestCase):
         self.assertTrue(result["data"]["direction_flip"])
         self.assertEqual(result["data"]["material_side"], "positive_normal")
 
-    def test_spanning_body_fails_closed_before_semantic_cut(self):
+    def test_spanning_body_fails_closed(self):
         automation = _Harness(
             [-0.07, 0.01, -0.04, 0.06, 0.03, 0.04])
 
-        result = automation.semantic_cut(
-            scope_body_ids=["body:insert_main"],
-            sketch_name="S_pocket",
-            depth=15,
-            direction_flip=True,
-            direction_mode="auto_material_side",
-            feature_name="F_main_pocket",
-            unit="mm")
+        result = automation.resolve_cut_direction(
+            ["body:insert_main"], "S_pocket", unit="mm")
 
         self.assertFalse(result["success"])
         self.assertEqual(result["data"]["error"]["code"], "INVALID_PLAN")
         self.assertEqual(
             result["data"]["error"]["stage"], "validate_geometry")
-        self.assertEqual(automation.semantic_calls, [])
-
-    def test_auto_mode_overrides_wrong_explicit_flag_before_mutation(self):
-        automation = _Harness(
-            [-0.07, 0.0, -0.04, 0.06, 0.02, 0.04])
-
-        result = automation.semantic_cut(
-            scope_body_ids=["body:insert_main"],
-            sketch_name="S_pocket",
-            depth=15,
-            direction_flip=True,
-            direction_mode="auto_material_side",
-            feature_name="F_main_pocket",
-            unit="mm")
-
-        self.assertTrue(result["success"], result)
-        self.assertEqual(len(automation.semantic_calls), 1)
-        self.assertFalse(automation.semantic_calls[0]["direction_flip"])
-        data = result["data"]
-        self.assertEqual(data["direction_mode"], "auto_material_side")
-        self.assertTrue(data["requested_direction_flip"])
-        self.assertFalse(data["effective_direction_flip"])
-        self.assertFalse(data["cut_direction_preflight"]["direction_flip"])
-
-    def test_explicit_mode_preserves_backward_compatible_flag(self):
-        automation = _Harness(
-            [-0.07, 0.0, -0.04, 0.06, 0.02, 0.04])
-
-        result = automation.semantic_cut(
-            scope_body_ids=["body:insert_main"],
-            sketch_name="S_pocket",
-            direction_flip=True,
-            direction_mode="explicit",
-            unit="mm")
-
-        self.assertTrue(result["success"], result)
-        self.assertTrue(automation.semantic_calls[0]["direction_flip"])
-        self.assertNotIn("cut_direction_preflight", result["data"])
 
     def test_tool_registry_exposes_resolver_and_auto_mode_schema(self):
         register_identity_tools()
