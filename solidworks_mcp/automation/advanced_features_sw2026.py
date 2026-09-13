@@ -61,8 +61,9 @@ class AdvancedFeatureOperations(_BaseAdvancedFeatures):
         for record in reversed(temporary_renames):
             old_name = record.get("from")
             new_name = record.get("to")
-            feature = (self._find_feature(doc, new_name) or
-                       self._find_feature(doc, old_name))
+            feature = self._find_feature(doc, new_name)
+            if feature is None:
+                feature = self._find_feature(doc, old_name)
             if feature is None:
                 details["feature_restore_failures"].append({
                     "from": new_name,
@@ -93,7 +94,9 @@ class AdvancedFeatureOperations(_BaseAdvancedFeatures):
         for record in reversed(body_aliases):
             old_name = record.get("from")
             alias = record.get("to")
-            body = self._find_body(doc, alias) or self._find_body(doc, old_name)
+            body = self._find_body(doc, alias)
+            if body is None:
+                body = self._find_body(doc, old_name)
             if body is None:
                 details["body_restore_failures"].append({
                     "from": alias,
