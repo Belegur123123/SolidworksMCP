@@ -30,11 +30,14 @@ For acceptance tests, distinguish these layers explicitly:
 1. Runtime implementation: inspect `SolidWorksAutomation` methods and MRO.
 2. Server MCP manifest: call `server.list_tools()` and confirm the semantic tool
    names and schemas are present.
-3. Client-visible manifest: confirm the actual MCP client exposes the same tool
+3. MCP SDK request boundary: exercise the registered `ListToolsRequest` handler.
+   The low-level `server._tool_cache` is lazy and is populated/refreshed by this
+   request wrapper, not by directly calling the decorated callback function.
+4. Client-visible manifest: confirm the actual MCP client exposes the same tool
    names for direct invocation.
 
-All three must agree before a direct ChatGPT -> semantic MCP tool acceptance test
-is started.
+All layers must agree before a direct ChatGPT -> semantic MCP tool acceptance
+test is started.
 
 ## Refresh procedure
 
@@ -53,8 +56,10 @@ is intended to validate.
 
 ## Regression coverage
 
-`tests/test_semantic_mcp_exposure.py` calls the real asynchronous
-`solidworks_mcp.server.list_tools()` function and verifies that all five semantic
-identity tools are exposed with the expected schemas. This protects against a
-server-side registration regression independently of any external client's
-schema cache.
+`tests/test_semantic_mcp_exposure.py` verifies both the real asynchronous
+`solidworks_mcp.server.list_tools()` callback and the actual low-level MCP
+`ListToolsRequest` wrapper. The latter is required before asserting the SDK's
+`server._tool_cache`, because that cache is intentionally lazy. The tests also
+verify that all five semantic identity tools are exposed with the expected
+schemas. This protects against a server-side registration regression
+independently of any external client's schema cache.
