@@ -8,7 +8,8 @@ additional guarantees important for long-lived complex models:
 
 It also separates per-session recovery records by active SOLIDWORKS
 configuration so a signature learned in one configuration cannot be reused in
-another.
+another.  Optional semantic-cut auto direction remains inside this resilient
+mutation boundary and consumes the read-only cut-direction resolver.
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from typing import Dict, List
 
 from .body_identity import BodyIdentityOperations as _BaseBodyIdentityOperations
 from .com_utils import com_get
+
+
+_DIRECTION_MODES = ("explicit", "auto_material_side")
 
 
 class BodyIdentityOperations(_BaseBodyIdentityOperations):
@@ -115,6 +119,8 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
                      sketch_name: str = None,
                      end_condition: str = "blind", depth: float = 10.0,
                      direction_flip: bool = False,
+                     direction_mode: str = "explicit",
+                     direction_tolerance: float = 0.01,
                      offset_reverse: bool = False,
                      translate_surface: bool = False,
                      start_condition: str = "sketch_plane",
@@ -130,21 +136,27 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
                      expected_bbox: Dict = None,
                      expected_merge_bodies: List[str] = None,
                      unit: str = None) -> Dict:
-        """Reject session-only/noncanonical scope before any CAD mutation."""
+        """Reject unsafe scope and optionally resolve direction before mutation."""
         if not scope_body_ids:
             return self._error(
                 "INVALID_PLAN", "scope_body_ids must contain at least one body id",
                 stage="validate_plan", recoverable=True)
+        if direction_mode not in _DIRECTION_MODES:
+            return self._error(
+                "INVALID_PLAN",
+                f"direction_mode must be one of {list(_DIRECTION_MODES)}",
+                stage="validate_plan", recoverable=True,
+                details={"direction_mode": direction_mode})
 
         doc, err = self.get_active_doc()
         if err:
             return err
-        preflight = []
+        scope_preflight = []
         for body_id in scope_body_ids:
             _, record, resolve_err = self._find_body_by_identity(doc, body_id)
             if resolve_err:
                 return resolve_err
-            preflight.append(record)
+            scope_preflight.append(record)
             if record.get("current_name") != record.get("canonical_name"):
                 return self._error(
                     "REFERENCE_MISMATCH",
@@ -156,12 +168,33 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
                         "before mutating the body."],
                     details={"body_id": body_id, "identity": record})
 
+        requested_direction = bool(direction_flip)
+        effective_direction = requested_direction
+        direction_preflight = None
+        if direction_mode == "auto_material_side":
+            resolver = getattr(self, "resolve_cut_direction", None)
+            if resolver is None:
+                return self._error(
+                    "CAPABILITY_UNAVAILABLE",
+                    "Automatic cut-direction resolver is not available",
+                    stage="capability", recoverable=False,
+                    details={"direction_mode": direction_mode})
+            direction_preflight = resolver(
+                scope_body_ids=scope_body_ids,
+                sketch_name=sketch_name,
+                direction_tolerance=direction_tolerance,
+                unit=unit)
+            if not direction_preflight.get("success"):
+                return direction_preflight
+            effective_direction = bool(
+                (direction_preflight.get("data") or {}).get("direction_flip"))
+
         result = super().semantic_cut(
             scope_body_ids=scope_body_ids,
             sketch_name=sketch_name,
             end_condition=end_condition,
             depth=depth,
-            direction_flip=direction_flip,
+            direction_flip=effective_direction,
             offset_reverse=offset_reverse,
             translate_surface=translate_surface,
             start_condition=start_condition,
@@ -178,6 +211,13 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
             expected_merge_bodies=expected_merge_bodies,
             unit=unit,
         )
+
+        data = result.setdefault("data", {})
+        data["direction_mode"] = direction_mode
+        data["requested_direction_flip"] = requested_direction
+        data["effective_direction_flip"] = effective_direction
+        if direction_preflight is not None:
+            data["cut_direction_preflight"] = direction_preflight.get("data", {})
         if result.get("success"):
-            result.setdefault("data", {})["semantic_scope_preflight"] = preflight
+            data["semantic_scope_preflight"] = scope_preflight
         return result
