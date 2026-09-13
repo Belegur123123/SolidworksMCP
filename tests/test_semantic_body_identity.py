@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 
@@ -6,6 +7,7 @@ from solidworks_mcp.automation.body_identity import (
 from solidworks_mcp.automation.runtime import structured_error
 from solidworks_mcp.constants import SwErrors
 from solidworks_mcp import tool_registry
+from solidworks_mcp.server import list_tools
 
 
 class _Body:
@@ -220,6 +222,22 @@ class SemanticBodyIdentityTests(unittest.TestCase):
         self.assertNotIn("list_body_identities", tool_registry.MUTATING_TOOLS)
         self.assertIn("semantic_extrude", tool_registry.FIRST_GEOMETRY_TOOLS)
         self.assertIn("semantic_cut", tool_registry.FIRST_GEOMETRY_TOOLS)
+
+    def test_server_exposes_semantic_identity_tools(self):
+        tools = asyncio.run(list_tools())
+        names = {tool.name for tool in tools}
+        self.assertTrue({
+            "register_body_identity", "resolve_body_identity",
+            "list_body_identities", "semantic_extrude", "semantic_cut"
+        }.issubset(names))
+
+        semantic_cut = next(tool for tool in tools
+                            if tool.name == "semantic_cut")
+        self.assertIn("scope_body_ids", semantic_cut.inputSchema["properties"])
+        self.assertIn("budget", semantic_cut.inputSchema["properties"])
+        resolve = next(tool for tool in tools
+                       if tool.name == "resolve_body_identity")
+        self.assertNotIn("budget", resolve.inputSchema["properties"])
 
 
 if __name__ == "__main__":
