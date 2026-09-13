@@ -1,15 +1,16 @@
 """SW2026 safety wrapper for advanced feature operations.
 
-This layer preserves pre-existing feature names when a scoped cut causes the
-SolidWorks body/feature display-name namespace to collide. SOLIDWORKS 2026 can
-legitimately refuse to rename the post-cut body back to the old body name while
-an older source feature still owns that same name. The upstream implementation
-resolved that collision by renaming the source feature. For parametric models
-that is the wrong priority: feature names are stable references, while body
-names are selection/display handles.
+This layer preserves pre-existing feature names when a single-ended scoped cut
+causes the SolidWorks body/feature display-name namespace to collide.
+SOLIDWORKS 2026 can legitimately refuse to rename the post-cut body back to the
+old body name while an older source feature still owns that same name. The
+upstream implementation resolved that collision by renaming the source feature.
+For parametric models that is the wrong priority: feature names are stable
+references, while body names are selection/display handles.
 
 Policy:
-- Never leave a pre-existing source feature renamed by advanced_cut.
+- For single-ended scoped cuts, never leave a pre-existing source feature
+  renamed by advanced_cut.
 - If the requested scoped body name collides with that source feature after the
   cut, move the body to a deterministic ``<old>_Body`` alias (with a numeric
   suffix only when necessary), then restore the source feature's original name.
@@ -17,6 +18,10 @@ Policy:
 - If this repair cannot be verified, delete the newly created cut feature and
   best-effort restore the original names, then return a structured invariant
   failure instead of silently changing the model tree.
+- Double-ended cuts retain the upstream body-name-priority contract for backward
+  compatibility. That path is already covered by the v6 regression suite and
+  is intentionally not changed until the same source-feature-name policy has
+  been validated live for double-ended FeatureCut4 operations.
 """
 
 from __future__ import annotations
@@ -270,11 +275,68 @@ class AdvancedFeatureOperations(_BaseAdvancedFeatures):
         ).strip()
         return result
 
-    def advanced_cut(self, *args, **kwargs) -> Dict:
-        """Run the native cut, then enforce source-feature name stability."""
-        result = super().advanced_cut(*args, **kwargs)
+    def advanced_cut(self, sketch_name: str = None,
+                     end_condition: str = "blind",
+                     depth: float = 10.0,
+                     direction_flip: bool = False,
+                     offset_reverse: bool = False,
+                     translate_surface: bool = False,
+                     start_condition: str = "sketch_plane",
+                     start_offset: float = 0.0,
+                     flip_start_offset: bool = False,
+                     ref_face_ray: Dict = None,
+                     start_face_ray: Dict = None,
+                     scope_bodies: List[str] = None,
+                     normal_cut: bool = False,
+                     optimize_geometry: bool = False,
+                     feature_name: str = None,
+                     auto_verify: bool = True,
+                     auto_flags: bool = False,
+                     expected_bbox: Dict = None,
+                     expected_merge_bodies: List[str] = None,
+                     unit: str = None) -> Dict:
+        """Run the native cut, then enforce the SW2026 naming policy.
+
+        Single-ended cuts get source-feature-name preservation. Double-ended
+        cuts retain the established upstream body-name-priority contract until
+        that path is separately live-validated under the stricter policy.
+        """
+        result = super().advanced_cut(
+            sketch_name=sketch_name,
+            end_condition=end_condition,
+            depth=depth,
+            direction_flip=direction_flip,
+            offset_reverse=offset_reverse,
+            translate_surface=translate_surface,
+            start_condition=start_condition,
+            start_offset=start_offset,
+            flip_start_offset=flip_start_offset,
+            ref_face_ray=ref_face_ray,
+            start_face_ray=start_face_ray,
+            scope_bodies=scope_bodies,
+            normal_cut=normal_cut,
+            optimize_geometry=optimize_geometry,
+            feature_name=feature_name,
+            auto_verify=auto_verify,
+            auto_flags=auto_flags,
+            expected_bbox=expected_bbox,
+            expected_merge_bodies=expected_merge_bodies,
+            unit=unit,
+        )
         if not result.get("success"):
             return result
+
+        data = result.setdefault("data", {})
+        if data.get("double_ended"):
+            data.setdefault(
+                "source_feature_names_preserved",
+                not bool(data.get("scope_feature_renames")))
+            data.setdefault("scope_body_name_changes", [])
+            data.setdefault(
+                "body_name_policy",
+                "legacy_body_name_priority_double_ended")
+            return result
+
         doc, err = self.get_active_doc()
         if err:
             return err
