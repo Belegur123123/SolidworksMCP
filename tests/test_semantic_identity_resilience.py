@@ -96,6 +96,18 @@ class _Harness(BodyIdentityOperations):
 
 
 class SemanticIdentityResilienceTests(unittest.TestCase):
+    def test_auto_bbox_failure_does_not_recommend_trial_flags(self):
+        automation = _Harness(_Doc([_Body('B_insert_main')]))
+        automation.advanced_cut = lambda **kw: automation._result(
+            False, 'Cut landed OUTSIDE the expected zone. Feature rolled back. '
+            'Try flipping flip_start_offset/direction_flip or auto_flags=true.',
+            SwErrors.swFeatureError, {'feature_deleted': True})
+        result = automation.semantic_cut(['body:insert_main'], direction_mode='auto_material_side')
+        self.assertFalse(result['success'])
+        self.assertNotIn('auto_flags=true', result['message'])
+        self.assertIn('verify expected_bbox', result['message'])
+        self.assertTrue(result['data']['feature_deleted'])
+
     def test_post_cut_identity_failure_rolls_back_and_rehydrates_identity(self):
         class RollbackHarness(_Harness):
             def advanced_cut(self, **kwargs):

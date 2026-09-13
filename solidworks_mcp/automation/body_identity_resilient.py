@@ -228,6 +228,14 @@ class BodyIdentityOperations(_BaseBodyIdentityOperations):
         )
 
         data = result.setdefault("data", {})
+        if direction_preflight is not None and not result.get("success"):
+            # Legacy bbox diagnostics suggest trial flags. Auto mode has already
+            # proved the material side and must not recommend flag retries.
+            result["message"] = str(result.get("message", "")).replace(
+                "Try flipping flip_start_offset/direction_flip or auto_flags=true.",
+                "In auto_material_side mode, verify expected_bbox and the "
+                "requested cut geometry. Use explicit mode only with an "
+                "independently verified direction.")
         data["direction_mode"] = direction_mode
         data["requested_direction_flip"] = requested_direction
         data["effective_direction_flip"] = effective_direction
