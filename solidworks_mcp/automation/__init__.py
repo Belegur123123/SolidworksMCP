@@ -32,16 +32,16 @@ register_cut_direction_tools()
 
 # MoreFeatureOperations precedes FeatureOperations so its improved
 # fillet_edges/chamfer_edges (ray edge selection) win over the legacy ones.
-# CutDirectionOperations precedes BodyIdentityOperations so its semantic_cut
-# wrapper can perform the read-only direction preflight and then delegate to the
-# existing resilient semantic identity implementation through cooperative MRO.
+# BodyIdentityOperations remains the public semantic_cut mutation boundary;
+# CutDirectionOperations is a later read-only capability that the resilient
+# semantic wrapper invokes explicitly in auto_material_side mode.
 class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
                            TransactionOperations, DimensionUpdateOperations,
                            ParametricSketchOperations, ImageSketchOperations,
                            HighLevelOperations, SketchOperations,
                            MoreFeatureOperations, FeatureOperations,
-                           AdvancedFeatureOperations, CutDirectionOperations,
-                           BodyIdentityOperations, BodyOperations,
+                           AdvancedFeatureOperations, BodyIdentityOperations,
+                           CutDirectionOperations, BodyOperations,
                            GeometryProbeOperations, ViewOperations):
     """
     Complete SolidWorks automation class
@@ -52,8 +52,8 @@ class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
     - Sketches: Create sketches, draw 2D geometry
     - Features: Extrude, cut, fillet, chamfer, list
     - AdvancedFeatures: delete/rename/status, advanced_extrude/advanced_cut
-    - CutDirection: read-only sketch/body direction preflight for semantic cuts
     - BodyIdentity: durable body:<id> resolution and semantic_extrude/cut
+    - CutDirection: read-only sketch/body direction preflight for semantic cuts
     - Bodies: list/show/hide/rename/transparency
     - GeometryProbe: probe_ray(s), select_face_by_ray, sketch_contour
     - View: take_screenshot, set_view_orientation
@@ -76,8 +76,8 @@ __all__ = [
     "SketchOperations",
     "FeatureOperations",
     "AdvancedFeatureOperations",
-    "CutDirectionOperations",
     "BodyIdentityOperations",
+    "CutDirectionOperations",
     "MoreFeatureOperations",
     "BodyOperations",
     "GeometryProbeOperations",
