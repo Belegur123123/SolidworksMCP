@@ -14,7 +14,7 @@ from .bodies import BodyOperations
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
 from .transactions import TransactionOperations
-from .parametric import ParametricSketchOperations
+from .parametric_sw2026 import ParametricSketchOperations
 from .vectorization import ImageSketchOperations
 from .high_level import HighLevelOperations
 
