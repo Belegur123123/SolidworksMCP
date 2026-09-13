@@ -255,8 +255,9 @@ class ViewOperations:
             return body_points, "visible_bodies"
         return [], "empty_geometry"
 
-    def _fit_measurement(self, doc, points, min_fill=0.35,
-                         max_fill=0.90, max_center_offset=0.18):
+    def _fit_measurement(self, doc, points, min_fill=0.25,
+                         max_fill=0.90, max_center_offset=0.30,
+                         clip_tolerance_fraction=0.01):
         """Measure a model-space point cloud in actual screen pixels."""
         view = com_get(doc, "ActiveView", default=None)
         transform = com_get(view, "Transform", default=None) if view else None
@@ -278,9 +279,20 @@ class ViewOperations:
         center_offset = math.hypot(
             (center_x - frame_width * 0.5) / frame_width,
             (center_y - frame_height * 0.5) / frame_height)
-        clipped = (bbox[0] < -1.0 or bbox[1] < -1.0 or
-                   bbox[2] > frame_width + 1.0 or
-                   bbox[3] > frame_height + 1.0)
+        # SW2026 reports ActiveView.FrameWidth/FrameHeight for the complete
+        # graphics frame while the usable model viewport can be shifted by
+        # surrounding UI chrome. ViewZoomTo2/Scale2 can therefore leave a
+        # correctly framed sketch a few pixels outside those nominal bounds.
+        # Allow a small proportional edge tolerance, but keep grossly clipped
+        # or strongly off-centre geometry rejected.
+        clip_tolerance_x = max(2.0, frame_width *
+                               float(clip_tolerance_fraction))
+        clip_tolerance_y = max(2.0, frame_height *
+                               float(clip_tolerance_fraction))
+        clipped = (bbox[0] < -clip_tolerance_x or
+                   bbox[1] < -clip_tolerance_y or
+                   bbox[2] > frame_width + clip_tolerance_x or
+                   bbox[3] > frame_height + clip_tolerance_y)
         verified = (min_fill <= fill <= max_fill and
                     center_offset <= max_center_offset and not clipped)
         return {
@@ -294,7 +306,9 @@ class ViewOperations:
             "clipped": clipped,
             "scale2": float(com_get(view, "Scale2", default=0.0) or 0.0),
             "limits": {"min_fill": min_fill, "max_fill": max_fill,
-                       "max_center_offset": max_center_offset},
+                       "max_center_offset": max_center_offset,
+                       "clip_tolerance_px": [round(clip_tolerance_x, 3),
+                                             round(clip_tolerance_y, 3)]},
         }
 
     def _zoom_to_points(self, doc, points, margin=0.12):

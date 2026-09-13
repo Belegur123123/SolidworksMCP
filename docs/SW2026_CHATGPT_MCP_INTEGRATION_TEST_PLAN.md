@@ -26,7 +26,7 @@ Repository: `Belegur123123/SolidworksMCP`
 
 Arbeitsbranch: `fix/sw2026-coincident-constraint`
 
-Verifizierter Branch-Stand vor dieser Planrevision: `f67814bc32e71eb503f36075ed1cfd2c71e9b3cc`
+Letzter committed Plan-Stand vor den aktuellen Codefixes: `77cd5d745258b17b8c69ef1e625d61a1c468f03b`
 
 SOLIDWORKS: `SOLIDWORKS Design Premium 2026 SP0.0 / API 34.x`
 
@@ -36,7 +36,7 @@ Tunnel: `openai/tunnel-client 0.0.14`
 
 Aktuell validiert:
 
-- 220 lokale Regressionstests erfolgreich, 0 Fehler, 0 Skips.
+- 225 lokale Regressionstests erfolgreich, 0 Fehler, 0 Skips (aktueller Working-Tree-Stand).
 - SW2026 Coincident-/SketchPoint-Reacquisition und Dynamic-Dispatch-Pfade live bestaetigt.
 - Parametrischer Rechteck-/Extrusions-/Dimensionsaenderungs-Workflow live bestaetigt.
 - Semantische Body-Identity-Schicht implementiert und lokal regressionsgetestet.
@@ -50,11 +50,12 @@ Aktuell validiert:
 
 Bekannte, noch nicht vollstaendig abgenommene Punkte:
 
-- echte Cross-Session-Persistenz der semantischen Identitaet nach Save/Close/Reopen + MCP/Tunnel-Neustart + neuer ChatGPT-Session,
-- Live-COM-Rollback-Matrix fuer absichtlich fehlschlagende Mutationen,
-- realer Multibody-/Semantic-Scoped-Cut ueber Reopen/Restart,
-- Idempotency bei unsicherem Transportzustand,
-- Dokument- und Konfigurationsisolation,
+- dreifache Cold-Start-/Session-Rebind-Wiederholung,
+- gezielt provozierter semantischer Postcondition-/Identity-Rollback gegen echtes SW2026-COM,
+- Multibody-Rehydration nach echtem Tunnel/MCP-Neustart und anschliessender weiterer Scoped Cut,
+- Idempotency-Replay nach Reconnect bzw. unsicherem Antwortzustand,
+- Live-Retest der korrigierten Dokumentaktivierung sowie reale Konfigurationsisolation,
+- kombinierter P1-A/P1-B-Constraint-/Dimensionstest,
 - laengere Modellierungssitzung / Stresstest,
 - semantische Face-/Edge-Identitaet ist bewusst noch nicht Teil der aktuellen Identity-Schicht.
 
@@ -364,3 +365,72 @@ P2 ist fuer die erste reale Nutzung kein harter Blocker, sollte aber vor laenger
 10. P2-A/B/C Robustheits- und Stresstests
 
 Nach jedem P0-Test wird das Ergebnis dokumentiert. Ein kritischer P0-Fehler blockiert die nachfolgenden mutierenden Tests, bis der Zustand eindeutig recovered oder die Ursache behoben ist.
+
+---
+
+# Live-Teststatus 2026-09-13 nach Reconnect-Abnahme
+
+## P0-G - Cold-Start / Session-Rebind
+
+**Status: PASS MIT EINSCHRAENKUNG / RECOVERED.**
+
+Nach manuellem Tunnel-Neustart war die zuvor terminierte ChatGPT-MCP-Session wieder direkt nutzbar. `get_environment_status` lief ohne Bypass; UI war `UI_READY`, keine modalen Dialoge. Der direkte Toolkatalog enthielt 88 Tools inklusive aller semantischen Identity-Tools und `resolve_cut_direction`. Die im Plan geforderte dreifache Cold-Start-Wiederholung ist noch offen.
+
+## P0-E - Cross-Session-Persistenz
+
+**Status: PASS.**
+
+Eine vor dem aktuellen MCP-Prozess gespeicherte Datei `IdentityPersistence_01387415.SLDPRT` wurde in einer neuen MCP-Session geoeffnet. `body:insert_main` wurde ohne alte Runtime-Registry aus `B_insert_main` per `canonical_name_inference` / `resolved_by=canonical_name` rehydriert; das gespeicherte Volumen blieb 109000 mm^3. Auf der daraus erzeugten Testkopie `P0E_CrossSession_Continuation.SLDPRT` wurde nach erneutem MCP-Neustart ein weiterer semantisch gescopter 2-mm-Cut `F_crosssession_followup` erzeugt. Das Volumen sank exakt auf 108200 mm^3. Save/Close/Reopen bestaetigte Body-Identity, Feature Health (5 Faces, alive) und Volumen unveraendert.
+
+## P0-F - Live-Rollback-Matrix
+
+**Status: WEITGEHEND PASS; ein semantischer Postcondition-Livefehler bleibt offen.**
+
+Bestaetigte reale Fehlerklassen:
+
+1. `auto_material_side` bei Body-BBox auf beiden Seiten der Skizzenebene: `INVALID_PLAN` vor Mutation.
+2. Bewusst falscher `expected_bbox`: realer Cut wurde erzeugt, danach `FEATURE_WRONG_BBOX` erkannt und das Feature wieder geloescht (`feature_deleted=true`); Volumen und Identity blieben unveraendert.
+3. Bewusst falsche Cut-Richtung: `FEATURE_CREATE_FAILED` in Stage `create_feature`, kein Ghost-Feature.
+4. Widerspruechliche Driving-Dimensionen (10 mm und 20 mm auf derselben Linie): `SKETCH_OVERDEFINED`, `document_restored=true`; Feature-Anzahl, Body, Volumen und Identity blieben unveraendert.
+
+Noch offen: gezielt provozierter semantischer Postcondition-/Identity-Fehler nach echter SW2026-Mutation. Der lokale Regressionstest `test_post_cut_identity_failure_rolls_back_and_rehydrates_identity` ist vorhanden und gruen.
+
+## P1-E/F - Semantischer Multibody / Scoped Cut
+
+**Status: PASS MIT EINSCHRAENKUNG; echter MCP-Restart innerhalb dieses Modells noch offen.**
+
+Testmodell mit drei getrennten semantischen Bodies:
+
+- `body:tray` -> `B_tray`, initial 16000 mm^3,
+- `body:divider` -> `B_divider`, initial 6000 mm^3,
+- `body:token_box` -> `B_token_box`, initial 12000 mm^3.
+
+Erster `semantic_cut` nur auf `body:tray`: `B_tray` 16000 -> 15600 mm^3; die beiden anderen Bodies blieben exakt unveraendert. Nach Save-As auf einen neuen Dateipfad wurden alle drei IDs mit `source=canonical_name_inference` rehydriert. Zweiter `semantic_cut` nur auf `body:divider`: `B_divider` 6000 -> 5700 mm^3; `B_tray=15600` und `B_token_box=12000` blieben unveraendert. Body Count blieb 3, keine Merge-/Scope-Fehler.
+
+Waehren des Aufbaus wurde einmal ein unbekanntes SOLIDWORKS-Popup erkannt. Es wurde nicht blind bestaetigt. `recover_environment(max_retries=0)` stellte mit Selection-Clear/Freeze-Bar-Check `UI_READY` wieder her; danach lief der Test normal weiter.
+
+## P0-H - Transport / Idempotency
+
+**Status: IN-SESSION IDEMPOTENCY PASS; Reconnect-Replay offen.**
+
+Ein `create_parametric_sketch` mit `idempotency_key=P0H-idem-sketch-top-20260913` wurde zweimal mit identischen Argumenten aufgerufen. Der zweite Aufruf lieferte `idempotent_replay=true` in ca. 32 ms. Feature-/Sketch-Zahl stieg nur einmal (27/5 -> 28/6); kein Duplikat entstand. Der Testsketch wurde anschliessend ohne Speichern verworfen. Die bereits dokumentierte Transportregel bleibt bestehen: lange lokale Arbeit via `execute_python_async`, da synchrone Subprozesse an der Request-Deadline 502 erzeugen koennen, ohne den Shared-stdio-Pfad dauerhaft zu zerstoeren.
+
+## View-/Fit-Verifikation - gefundene und korrigierte Fehler
+
+**Face-Sketch-Fall live PASS nach erstem Fix.** Der reproduzierbare 20x20-mm-Face-Sketch, der vorher nach korrekter Geometrieerzeugung faelschlich an der View-Verifikation scheiterte, bestand nach Neustart. Implementiert wurden `max_center_offset=0.30` und achsenspezifische Clipping-Toleranzen von 1 % der Frame-Dimension.
+
+**Zweiter Fall: schlanker Right-Plane-Sketch.** Live zeigte `ViewZoomtofit2` bereits einen vollstaendig sichtbaren Frame mit `dominant_fill_ratio=0.261347`, `center_offset=0.225023`, `clipped=false`. Die bisherige Mindestfuellung 0.35 erzwang danach eine unnoetige Hochskalierung, die den Sketch aus dem Frame schob. Lokaler Fix: Mindestfuellung auf 0.25 senken, waehrend max. Fuelle 0.90, Center 0.30 und Clipping-Grenzen unveraendert bleiben. Neuer Regressionstest `test_fit_measurement_accepts_visible_slender_quarter_frame` ist gruen. Live-Retest nach MCP-Neustart steht noch aus.
+
+## P1-G - Dokument-/Konfigurationsisolation
+
+**Status Dokumentisolation: FAIL - RECOVERED; Codefix lokal vorhanden. Konfigurations-Livefall offen.**
+
+Zwei Parts wurden gleichzeitig geoeffnet und enthielten dieselbe logische ID `body:tray`, jedoch eindeutig verschiedene Geometrien. Dokument A hatte `B_tray` bei x ca. -60..-20 mm; Dokument B bei x=100..120 mm. Ein direkter `open_document(A)` meldete zwar Erfolg, der anschliessende Identity-Readback lief aber weiterhin gegen Dokument B (`document_key=...p1g_documentisolation_b...`). Ursache: `open_document()` rief nur `OpenDoc6()` auf; fuer bereits geoeffnete Dateien garantiert SOLIDWORKS dadurch keine Aktivierung.
+
+Lokaler Fix: Nach `OpenDoc6()` wird der aktive Dokumentpfad geprueft; bei Abweichung wird `ActivateDoc2` ausgefuehrt und der aktive Pfad erneut verifiziert. Bei verbleibender Abweichung schlaegt `open_document()` fail-closed fehl, statt nachfolgende MCP-Mutationen am falschen Dokument zu riskieren. Zwei Regressionstests decken erfolgreiche Aktivierung und Fail-Closed ab. Der Live-Retest benoetigt einen MCP-Neustart.
+
+## Regression nach aktuellen Codefixes
+
+**225 Tests, 0 Fehler, 0 Skips.**
+
+Die zwei aktuell noch nicht im laufenden MCP-Prozess geladenen Codeaenderungen sind: `min_fill=0.25` fuer sichtbare schlanke Sketches und die verifizierte Dokumentaktivierung in `open_document()`. Beide sind lokal regressionsgetestet; die Live-Abnahme folgt nach dem naechsten MCP/Tunnel-Neustart.

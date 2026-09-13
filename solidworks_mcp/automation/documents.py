@@ -228,9 +228,50 @@ class DocumentOperations:
 
             title = self._get_doc_title(doc)
 
+            # OpenDoc6 returns an existing document when the file is already
+            # open, but SOLIDWORKS does not guarantee that it becomes ActiveDoc.
+            # Every public open must therefore establish and verify the active
+            # document explicitly; otherwise subsequent MCP mutations can hit
+            # whichever document happened to be active before this call.
+            target_path = os.path.normcase(os.path.abspath(filepath))
+            active_doc = com_get(self._sw_app, "ActiveDoc", default=None)
+            active_path = (self._get_doc_path(active_doc) if active_doc else "")
+            active_key = (os.path.normcase(os.path.abspath(active_path))
+                          if active_path else "")
+            activation_method = "already_active"
+            activation_error = 0
+            if active_key != target_path:
+                activation_errors = win32com.client.VARIANT(
+                    pythoncom.VT_BYREF | pythoncom.VT_I4, 0)
+                activated = self._sw_app.ActivateDoc2(
+                    title, False, activation_errors)
+                activation_error = int(activation_errors.value or 0)
+                activation_method = "ActivateDoc2"
+                if activated is not None:
+                    doc = activated
+                active_doc = com_get(self._sw_app, "ActiveDoc", default=None)
+                active_path = (self._get_doc_path(active_doc)
+                               if active_doc else "")
+                active_key = (os.path.normcase(os.path.abspath(active_path))
+                              if active_path else "")
+
+            if active_key != target_path:
+                return self._result(
+                    False,
+                    f"Opened '{title}' but failed to activate the requested document",
+                    SwErrors.swFileLoadError,
+                    {"name": title, "path": filepath,
+                     "active_path": active_path,
+                     "activation_method": activation_method,
+                     "activation_error": activation_error})
+
             return self._result(True, f"Opened: {title}",
                               SwErrors.swSuccess,
-                              {"name": title, "path": filepath})
+                              {"name": title, "path": filepath,
+                               "active_path": active_path,
+                               "activation_verified": True,
+                               "activation_method": activation_method,
+                               "activation_error": activation_error})
 
         except Exception as e:
             logger.error(f"Open document error: {e}\n{traceback.format_exc()}")

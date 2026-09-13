@@ -352,6 +352,85 @@ class V6Tests(unittest.TestCase):
         self.assertIsInstance(
             resolve_solidworks_constant("swInputDimValOnCreate"), int)
 
+    def test_open_document_activates_existing_document_and_verifies_readback(self):
+        automation = SolidWorksAutomation()
+
+        class Doc:
+            def __init__(self, title, path):
+                self._title = title
+                self._path = path
+            def GetTitle(self):
+                return self._title
+            def GetPathName(self):
+                return self._path
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "Target.SLDPRT")
+            other = os.path.join(directory, "Other.SLDPRT")
+            Path(target).write_bytes(b"test")
+            target_doc = Doc("Target.SLDPRT", target)
+            other_doc = Doc("Other.SLDPRT", other)
+
+            class App:
+                RevisionNumber = "34.0"
+                def __init__(self):
+                    self.ActiveDoc = other_doc
+                    self.activate_calls = []
+                def OpenDoc6(self, path, doc_type, options, config, errors, warnings):
+                    return target_doc
+                def ActivateDoc2(self, title, silent, errors):
+                    self.activate_calls.append((title, silent))
+                    self.ActiveDoc = target_doc
+                    return target_doc
+
+            app = App()
+            automation._sw_app = app
+            automation._connected = True
+            result = automation.open_document(target)
+
+            self.assertTrue(result["success"], result)
+            self.assertTrue(result["data"]["activation_verified"])
+            self.assertEqual(result["data"]["activation_method"], "ActivateDoc2")
+            self.assertEqual(os.path.normcase(result["data"]["active_path"]),
+                             os.path.normcase(target))
+            self.assertEqual(app.activate_calls, [("Target.SLDPRT", False)])
+
+    def test_open_document_fails_closed_when_requested_doc_is_not_activated(self):
+        automation = SolidWorksAutomation()
+
+        class Doc:
+            def __init__(self, title, path):
+                self._title = title
+                self._path = path
+            def GetTitle(self):
+                return self._title
+            def GetPathName(self):
+                return self._path
+
+        with tempfile.TemporaryDirectory() as directory:
+            target = os.path.join(directory, "Target.SLDPRT")
+            other = os.path.join(directory, "Other.SLDPRT")
+            Path(target).write_bytes(b"test")
+            target_doc = Doc("Target.SLDPRT", target)
+            other_doc = Doc("Other.SLDPRT", other)
+
+            class App:
+                RevisionNumber = "34.0"
+                ActiveDoc = other_doc
+                def OpenDoc6(self, path, doc_type, options, config, errors, warnings):
+                    return target_doc
+                def ActivateDoc2(self, title, silent, errors):
+                    return target_doc
+
+            automation._sw_app = App()
+            automation._connected = True
+            result = automation.open_document(target)
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["data"]["activation_method"], "ActivateDoc2")
+            self.assertEqual(os.path.normcase(result["data"]["active_path"]),
+                             os.path.normcase(other))
+
     def test_new_document_template_uses_solidworks_user_preference(self):
         automation = SolidWorksAutomation()
         with tempfile.TemporaryDirectory() as directory:
@@ -4529,6 +4608,105 @@ class V6Tests(unittest.TestCase):
                       result["methods"])
         self.assertEqual(document.ActiveView.Translation3.ArrayData,
                          [1.0, 0.0, 0.0])
+
+    def test_fit_measurement_allows_small_sw2026_frame_bias(self):
+        automation = SolidWorksAutomation()
+
+        class Transform:
+            ArrayData = [
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0,
+                730.0, 400.0, 0.0, 28000.0, 0.0, 0.0, 0.0]
+
+        class View:
+            FrameWidth = 1000
+            FrameHeight = 800
+            Scale2 = 28000.0
+
+        view = View()
+        view.Transform = Transform()
+
+        class Document:
+            pass
+
+        document = Document()
+        document.ActiveView = view
+
+        points = [(-0.01, -0.005, 0.0), (0.01, 0.005, 0.0),
+                  (-0.01, 0.005, 0.0), (0.01, -0.005, 0.0)]
+        result = automation._fit_measurement(document, points)
+
+        self.assertTrue(result["verified"])
+        self.assertAlmostEqual(result["center_offset_ratio"], 0.23, places=6)
+        self.assertEqual(result["screen_bbox_px"], [450.0, 260.0, 1010.0, 540.0])
+        self.assertFalse(result["clipped"])
+        self.assertEqual(result["limits"]["clip_tolerance_px"], [10.0, 8.0])
+
+    def test_fit_measurement_accepts_visible_slender_quarter_frame(self):
+        automation = SolidWorksAutomation()
+
+        class Transform:
+            ArrayData = [
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0,
+                720.0, 400.0, 0.0, 13000.0, 0.0, 0.0, 0.0]
+
+        class View:
+            FrameWidth = 1000
+            FrameHeight = 800
+            Scale2 = 13000.0
+
+        view = View()
+        view.Transform = Transform()
+
+        class Document:
+            pass
+
+        document = Document()
+        document.ActiveView = view
+        points = [(-0.01, -0.003, 0.0), (0.01, 0.003, 0.0),
+                  (-0.01, 0.003, 0.0), (0.01, -0.003, 0.0)]
+        result = automation._fit_measurement(document, points)
+
+        self.assertTrue(result["verified"])
+        self.assertAlmostEqual(result["dominant_fill_ratio"], 0.26, places=6)
+        self.assertAlmostEqual(result["center_offset_ratio"], 0.22, places=6)
+        self.assertFalse(result["clipped"])
+        self.assertEqual(result["limits"]["min_fill"], 0.25)
+
+    def test_fit_measurement_still_rejects_gross_frame_bias(self):
+        automation = SolidWorksAutomation()
+
+        class Transform:
+            ArrayData = [
+                1.0, 0.0, 0.0,
+                0.0, 1.0, 0.0,
+                0.0, 0.0, 1.0,
+                900.0, 400.0, 0.0, 28000.0, 0.0, 0.0, 0.0]
+
+        class View:
+            FrameWidth = 1000
+            FrameHeight = 800
+            Scale2 = 28000.0
+
+        view = View()
+        view.Transform = Transform()
+
+        class Document:
+            pass
+
+        document = Document()
+        document.ActiveView = view
+
+        points = [(-0.01, -0.005, 0.0), (0.01, 0.005, 0.0),
+                  (-0.01, 0.005, 0.0), (0.01, -0.005, 0.0)]
+        result = automation._fit_measurement(document, points)
+
+        self.assertFalse(result["verified"])
+        self.assertGreater(result["center_offset_ratio"], 0.30)
+        self.assertTrue(result["clipped"])
 
     def test_legacy_geometry_requires_normal_to_before_and_fit_after(self):
         automation = FakeAutomation()
