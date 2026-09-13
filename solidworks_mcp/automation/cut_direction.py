@@ -5,13 +5,14 @@ misinterpret: for an extruded cut, ``direction_flip=False`` cuts opposite the
 sketch normal, while ``direction_flip=True`` reverses that default and cuts
 along the sketch normal.
 
-This module adds a read-only geometry preflight and an optional semantic-cut
-mode that derives the correct flag from the closed sketch transform and the
-scoped semantic bodies before any feature mutation.
+This module adds a read-only geometry preflight. The public semantic-cut wrapper
+in ``body_identity_resilient`` consumes the result when
+``direction_mode='auto_material_side'`` so semantic identity remains the
+canonical mutation boundary.
 
-The automatic resolver is deliberately conservative.  It succeeds only when
-all scoped body bounding boxes lie unambiguously on the same side of the sketch
-plane.  If a body spans both sides of the plane, lies within tolerance only, or
+The automatic resolver is deliberately conservative. It succeeds only when all
+scoped body bounding boxes lie unambiguously on the same side of the sketch
+plane. If a body spans both sides of the plane, lies within tolerance only, or
 multiple scoped bodies disagree, the resolver fails closed instead of guessing.
 """
 
@@ -64,7 +65,7 @@ def register_cut_direction_tools() -> None:
         ))
     tool_registry.NEW_TOOL_NAMES.add("resolve_cut_direction")
 
-    # semantic_cut is registered by body_identity before this hook runs.  Add
+    # semantic_cut is registered by body_identity before this hook runs. Add
     # the new optional arguments without duplicating the tool or changing its
     # mutability contract.
     for tool in tool_registry.NEW_TOOLS:
@@ -87,7 +88,7 @@ def register_cut_direction_tools() -> None:
 
 
 class CutDirectionOperations:
-    """Read-only cut direction resolution plus semantic_cut auto-direction."""
+    """Read-only deterministic direction resolution for semantic cuts."""
 
     @staticmethod
     def _bbox_corners(box):
@@ -282,75 +283,3 @@ class CutDirectionOperations:
                     "direction_flip_true": "along_sketch_normal",
                 },
             })
-
-    def semantic_cut(self, scope_body_ids: List[str],
-                     sketch_name: str = None,
-                     end_condition: str = "blind", depth: float = 10.0,
-                     direction_flip: bool = False,
-                     direction_mode: str = "explicit",
-                     direction_tolerance: float = 0.01,
-                     offset_reverse: bool = False,
-                     translate_surface: bool = False,
-                     start_condition: str = "sketch_plane",
-                     start_offset: float = 0.0,
-                     flip_start_offset: bool = False,
-                     ref_face_ray: Dict = None,
-                     start_face_ray: Dict = None,
-                     normal_cut: bool = False,
-                     optimize_geometry: bool = False,
-                     feature_name: str = None,
-                     auto_verify: bool = True,
-                     auto_flags: bool = False,
-                     expected_bbox: Dict = None,
-                     expected_merge_bodies: List[str] = None,
-                     unit: str = None) -> Dict:
-        if direction_mode not in _DIRECTION_MODES:
-            return self._error(
-                "INVALID_PLAN",
-                f"direction_mode must be one of {list(_DIRECTION_MODES)}",
-                stage="validate_plan", recoverable=True,
-                details={"direction_mode": direction_mode})
-
-        requested_direction = bool(direction_flip)
-        preflight = None
-        effective_direction = requested_direction
-        if direction_mode == "auto_material_side":
-            preflight = self.resolve_cut_direction(
-                scope_body_ids=scope_body_ids,
-                sketch_name=sketch_name,
-                direction_tolerance=direction_tolerance,
-                unit=unit)
-            if not preflight.get("success"):
-                return preflight
-            effective_direction = bool(
-                (preflight.get("data") or {}).get("direction_flip"))
-
-        result = super().semantic_cut(
-            scope_body_ids=scope_body_ids,
-            sketch_name=sketch_name,
-            end_condition=end_condition,
-            depth=depth,
-            direction_flip=effective_direction,
-            offset_reverse=offset_reverse,
-            translate_surface=translate_surface,
-            start_condition=start_condition,
-            start_offset=start_offset,
-            flip_start_offset=flip_start_offset,
-            ref_face_ray=ref_face_ray,
-            start_face_ray=start_face_ray,
-            normal_cut=normal_cut,
-            optimize_geometry=optimize_geometry,
-            feature_name=feature_name,
-            auto_verify=auto_verify,
-            auto_flags=auto_flags,
-            expected_bbox=expected_bbox,
-            expected_merge_bodies=expected_merge_bodies,
-            unit=unit)
-
-        data = result.setdefault("data", {})
-        data["direction_mode"] = direction_mode
-        data["requested_direction_flip"] = requested_direction
-        data["effective_direction_flip"] = effective_direction
-        if preflight is not None:
-            data["cut_direction_preflight"] = preflight.get("data", {})
-        return result
