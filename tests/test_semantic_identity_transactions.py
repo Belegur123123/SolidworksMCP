@@ -32,6 +32,18 @@ class SemanticIdentityTransactionTests(unittest.TestCase):
             SolidWorksAutomation._find_body_by_identity.__module__,
             "solidworks_mcp.automation.body_identity_resilient")
 
+    def test_capabilities_report_semantic_tool_registration(self):
+        automation = SolidWorksAutomation()
+        result = automation.get_capabilities()
+        self.assertTrue(result["success"], result)
+        capability = result["data"]["semantic_body_identity"]
+        self.assertTrue(capability["available"])
+        self.assertTrue(all(capability["tool_registry_exposed"].values()))
+        self.assertEqual(capability["logical_id_prefix"], "body:")
+        self.assertEqual(capability["canonical_body_prefix"], "B_")
+        self.assertTrue(
+            capability["client_schema_refresh_required_after_toolset_change"])
+
 
 if __name__ == "__main__":
     unittest.main()
