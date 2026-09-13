@@ -41,6 +41,7 @@ class _Harness(BodyIdentityOperations):
         self.doc = doc
         self._runtime = SimpleNamespace(body_identities={})
         self.cut_calls = []
+        self.direction_calls = []
 
     def get_active_doc(self):
         return self.doc, None
@@ -81,11 +82,17 @@ class _Harness(BodyIdentityOperations):
         data["error"] = structured_error(code, message, **kwargs)
         return self._result(False, message, SwErrors.swUnknownError, data)
 
-    # Override the base semantic_cut so this test can prove that resilient
-    # preflight blocks noncanonical state before any mutation path is entered.
     def advanced_cut(self, **kwargs):
         self.cut_calls.append(dict(kwargs))
         return self._result(True, "cut", data={"feature_name": "F_cut"})
+
+    def resolve_cut_direction(self, **kwargs):
+        self.direction_calls.append(dict(kwargs))
+        return self._result(True, "direction", data={
+            "direction_flip": False,
+            "material_side": "negative_normal",
+            "method": "test_resolver",
+        })
 
 
 class SemanticIdentityResilienceTests(unittest.TestCase):
@@ -164,6 +171,33 @@ class SemanticIdentityResilienceTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["data"]["error"]["code"], "REFERENCE_MISMATCH")
         self.assertEqual(automation.cut_calls, [])
+        self.assertEqual(automation.direction_calls, [])
+
+    def test_semantic_cut_auto_direction_overrides_supplied_flag_before_cut(self):
+        automation = _Harness(_Doc([_Body("B_insert_main")]))
+
+        result = automation.semantic_cut(
+            scope_body_ids=["body:insert_main"],
+            sketch_name="S_pocket",
+            feature_name="F_pocket",
+            depth=15,
+            direction_flip=True,
+            direction_mode="auto_material_side",
+            direction_tolerance=0.01,
+            unit="mm")
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(len(automation.direction_calls), 1)
+        self.assertEqual(len(automation.cut_calls), 1)
+        self.assertFalse(automation.cut_calls[0]["direction_flip"])
+        data = result["data"]
+        self.assertEqual(data["direction_mode"], "auto_material_side")
+        self.assertTrue(data["requested_direction_flip"])
+        self.assertFalse(data["effective_direction_flip"])
+        self.assertFalse(data["cut_direction_preflight"]["direction_flip"])
+        self.assertEqual(
+            data["semantic_scope_preflight"][0]["canonical_name"],
+            "B_insert_main")
 
 
 if __name__ == "__main__":
