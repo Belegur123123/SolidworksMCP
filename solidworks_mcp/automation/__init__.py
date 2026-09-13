@@ -11,6 +11,7 @@ from .features import FeatureOperations
 from .advanced_features_sw2026 import AdvancedFeatureOperations
 from .more_features import MoreFeatureOperations
 from .bodies import BodyOperations
+from .body_identity import BodyIdentityOperations, register_identity_tools
 from .geometry_probe import GeometryProbeOperations
 from .view import ViewOperations
 from .transactions import TransactionOperations
@@ -20,6 +21,12 @@ from .vectorization import ImageSketchOperations
 from .high_level import HighLevelOperations
 
 
+# server.py imports automation before tool_registry. Register the semantic body
+# identity tools here so the existing generic v6 dispatch path exposes them
+# without duplicating the large legacy server dispatch table.
+register_identity_tools()
+
+
 # MoreFeatureOperations precedes FeatureOperations so its improved
 # fillet_edges/chamfer_edges (ray edge selection) win over the legacy ones.
 class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
@@ -27,8 +34,9 @@ class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
                            ParametricSketchOperations, ImageSketchOperations,
                            HighLevelOperations, SketchOperations,
                            MoreFeatureOperations, FeatureOperations,
-                           AdvancedFeatureOperations, BodyOperations,
-                           GeometryProbeOperations, ViewOperations):
+                           AdvancedFeatureOperations, BodyIdentityOperations,
+                           BodyOperations, GeometryProbeOperations,
+                           ViewOperations):
     """
     Complete SolidWorks automation class
 
@@ -38,6 +46,7 @@ class SolidWorksAutomation(_BaseAutomation, DocumentOperations,
     - Sketches: Create sketches, draw 2D geometry
     - Features: Extrude, cut, fillet, chamfer, list
     - AdvancedFeatures: delete/rename/status, advanced_extrude/advanced_cut
+    - BodyIdentity: durable body:<id> resolution and semantic_extrude/cut
     - Bodies: list/show/hide/rename/transparency
     - GeometryProbe: probe_ray(s), select_face_by_ray, sketch_contour
     - View: take_screenshot, set_view_orientation
@@ -60,6 +69,7 @@ __all__ = [
     "SketchOperations",
     "FeatureOperations",
     "AdvancedFeatureOperations",
+    "BodyIdentityOperations",
     "MoreFeatureOperations",
     "BodyOperations",
     "GeometryProbeOperations",
